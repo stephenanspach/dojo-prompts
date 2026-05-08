@@ -39,6 +39,7 @@ Then immediately ask what outputs they want:
 > - **English subtitles** — translated SRT for language learning reference
 > - **Condensed audio** — extract just the spoken audio for passive listening
 > - **Anki deck** — generate flashcards with audio clips and subtitle text
+> - **Primed-listening summary** — English-summary SRT (topical chunks) for primed-listening audio
 >
 > You can pick any combination.
 
@@ -87,6 +88,8 @@ python3 dojo-prompts/scripts/srt_watch.py -o <video_stem> <json_file_path>
 **Condensed audio** (if selected) — Use the **condensed-audio** skill. Read the full skill at `condensed-audio.md` (in the same directory as this file) and follow its instructions.
 
 **Anki deck** (if selected) — Use the **anki** skill. Read the full skill at `anki.md` (in the same directory as this file) and follow its instructions.
+
+**Primed-listening summary** (if selected) — Use the **primed-summaries** skill. Read the full skill at `primed-summaries.md` (in the same directory as this file) and follow its instructions, passing the Scribe JSON file. The skill itself will ask the user which models to use for the premise and window subagents.
 
 ### 3. Report results
 
