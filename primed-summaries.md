@@ -46,21 +46,7 @@ Sequential is required because the sliding window's cursor depends on the previo
 - **Input file** — look for a Scribe JSON file (`.json`) first, then fall back to an existing SRT. Always prefer JSON.
 - **Source language** — from argument or auto-detect by reading the first ~30 lines of the SRT, or by `head`-ing the JSON and inspecting a few `text` fields.
 
-### 2. Ask the user which models to use
-
-Use `AskUserQuestion` to ask **two separate questions** — never assume defaults. The two roles have different cost/quality profiles, so the user may want different models for each:
-
-1. **Premise model** — runs once, reads the entire transcript, sets global context for every window. Quality matters more than cost here.
-2. **Window model** — runs once per window (potentially dozens of times), summarizes ~40 sentences with the premise + recent summaries already supplied. This is the bulk of the cost.
-
-For each question, offer these options:
-- `Opus` — highest quality, highest cost
-- `Sonnet` — balanced
-- `Haiku` — fastest and cheapest
-
-Save the user's choices as `PREMISE_MODEL` and `WINDOW_MODEL` and use them in the corresponding `Task` calls below (pass via the Task tool's `model` parameter).
-
-### 3. Prepare state
+### 2. Prepare state
 
 ```bash
 rm -rf /tmp/primed-summaries
@@ -74,9 +60,9 @@ python3 dojo-prompts/scripts/srt_summarize.py prepare <json_or_srt_path>
 
 Output: `/tmp/primed-summaries/{blocks.json,state.json,full_transcript.txt}` plus the total sentence count and estimated number of windows.
 
-### 4. Generate the premise (one subagent, foreground)
+### 3. Generate the premise (one subagent, foreground)
 
-Spawn a subagent (Task tool, `subagent_type: "general-purpose"`, `model: <PREMISE_MODEL>`) with this prompt:
+Spawn a subagent (Task tool, `subagent_type: "general-purpose"`) with this prompt. The subagent inherits the current session's model — do not specify one.
 
 ```
 You are establishing the global context for a summarization task.
@@ -105,24 +91,26 @@ Wait for completion, then verify the file exists and is non-empty:
 test -s /tmp/primed-summaries/premise.txt && cat /tmp/primed-summaries/premise.txt
 ```
 
-### 5. Sliding window loop
+### 4. Sliding window loop
 
 Repeat until `next-window` prints `DONE`:
 
-#### 5a. Build the next window brief
+#### 4a. Build the next window brief
 
 ```bash
 python3 dojo-prompts/scripts/srt_summarize.py next-window "<source_language>"
 ```
 
 Output is one of:
-- `DONE` — all sentences are chunked. Skip to step 6.
+- `DONE` — all sentences are chunked. Skip to step 5.
 - `PARTIAL cursor=N window_size=M core_size=25 brief=/tmp/primed-summaries/window_brief.txt`
 - `FINAL cursor=N window_size=M core_size=25 brief=/tmp/primed-summaries/window_brief.txt`
 
 The brief file already contains the full prompt: premise + last 3 summaries + this window's numbered sentences + the rules. Don't read the brief into main context — the subagent will read it.
 
-#### 5b. Spawn a window subagent (Task tool, `model: <WINDOW_MODEL>`, foreground, sequential)
+#### 4b. Spawn a window subagent (Task tool, foreground, sequential)
+
+The subagent inherits the current session's model — do not specify one.
 
 ```
 Read /tmp/primed-summaries/window_brief.txt and follow its instructions.
@@ -132,7 +120,7 @@ to /tmp/primed-summaries/window_output.json.
 
 Wait for the subagent to complete before continuing. Do not run window subagents in parallel — each window depends on the previous window's accepted chunks.
 
-#### 5c. Accept the window
+#### 4c. Accept the window
 
 ```bash
 python3 dojo-prompts/scripts/srt_summarize.py accept /tmp/primed-summaries/window_output.json
@@ -146,9 +134,9 @@ If `accept` exits non-zero (malformed JSON, overlap, etc.), retry the same windo
 echo "cursor=<N> size=<M>" >> /tmp/primed-summaries/failed_windows.txt
 ```
 
-Loop back to 5a.
+Loop back to 4a.
 
-### 6. Finalize
+### 5. Finalize
 
 ```bash
 python3 dojo-prompts/scripts/srt_summarize.py finalize <output_path>
@@ -160,7 +148,7 @@ If `/tmp/primed-summaries/failed_windows.txt` exists, surface it to the user —
 
 **Never delete the Scribe JSON.**
 
-### 7. Spot check
+### 6. Spot check
 
 Read a few entries (beginning, middle, end) of the output SRT to verify timestamps span sensible ranges and summaries read as fluent English consistent with the premise.
 
