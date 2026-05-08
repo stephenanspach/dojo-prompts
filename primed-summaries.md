@@ -24,7 +24,9 @@ The output drives downstream "primed listening" audio (English preview → origi
 
 ## Usage
 
-The user provides the SRT file path. Optionally the source language can be specified inline (e.g. `/primed-summaries file.ja.srt Japanese`). If the source language is missing, read just the first ~30 lines of the SRT to auto-detect.
+The user provides a path to a Scribe JSON file or an SRT file. Optionally the source language can be specified inline (e.g. `/primed-summaries file.json Japanese`).
+
+**Always prefer JSON over SRT** — if a Scribe JSON file exists alongside the SRT (same basename), use the JSON. Only use an SRT directly if no JSON is available. If the source language is missing, read just the first ~30 lines of the SRT (or after generating one from JSON) to auto-detect.
 
 ## Architecture
 
@@ -41,10 +43,20 @@ Sequential is required because the sliding window's cursor depends on the previo
 
 ### 1. Gather inputs
 
-- **Input file** — path to a source-language SRT.
-- **Source language** — from argument or auto-detect from the first ~30 lines of the SRT.
+- **Input file** — look for a Scribe JSON file (`.json`) first, then fall back to an existing SRT. Always prefer JSON.
+- **Source language** — from argument or auto-detect from the first ~30 lines of the SRT (after generating one if starting from JSON).
 
-### 2. Prepare state
+### 2. Generate the source SRT (if starting from JSON)
+
+If the input is a Scribe JSON file, generate a source-language SRT first:
+
+```bash
+python3 dojo-prompts/scripts/srt_watch.py -o <video_stem> <json_path>
+```
+
+This produces `<video_stem>.srt`. If the input is already an SRT, skip this step.
+
+### 3. Prepare state
 
 ```bash
 rm -rf /tmp/primed-summaries
@@ -53,7 +65,7 @@ python3 dojo-prompts/scripts/srt_summarize.py prepare <srt_path>
 
 This parses the SRT, writes `/tmp/primed-summaries/{blocks.json,state.json,full_transcript.txt}`, and prints the total sentence count and estimated number of windows.
 
-### 3. Generate the premise (one subagent, foreground)
+### 4. Generate the premise (one subagent, foreground)
 
 Spawn a subagent (Task tool, `subagent_type: "general-purpose"`) with this prompt:
 
@@ -84,24 +96,24 @@ Wait for completion, then verify the file exists and is non-empty:
 test -s /tmp/primed-summaries/premise.txt && cat /tmp/primed-summaries/premise.txt
 ```
 
-### 4. Sliding window loop
+### 5. Sliding window loop
 
 Repeat until `next-window` prints `DONE`:
 
-#### 4a. Build the next window brief
+#### 5a. Build the next window brief
 
 ```bash
 python3 dojo-prompts/scripts/srt_summarize.py next-window "<source_language>"
 ```
 
 Output is one of:
-- `DONE` — all sentences are chunked. Skip to step 5.
+- `DONE` — all sentences are chunked. Skip to step 6.
 - `PARTIAL cursor=N window_size=M core_size=25 brief=/tmp/primed-summaries/window_brief.txt`
 - `FINAL cursor=N window_size=M core_size=25 brief=/tmp/primed-summaries/window_brief.txt`
 
 The brief file already contains the full prompt: premise + last 3 summaries + this window's numbered sentences + the rules. Don't read the brief into main context — the subagent will read it.
 
-#### 4b. Spawn a window subagent (Task tool, foreground, sequential)
+#### 5b. Spawn a window subagent (Task tool, foreground, sequential)
 
 ```
 Read /tmp/primed-summaries/window_brief.txt and follow its instructions.
@@ -111,7 +123,7 @@ to /tmp/primed-summaries/window_output.json.
 
 Wait for the subagent to complete before continuing. Do not run window subagents in parallel — each window depends on the previous window's accepted chunks.
 
-#### 4c. Accept the window
+#### 5c. Accept the window
 
 ```bash
 python3 dojo-prompts/scripts/srt_summarize.py accept /tmp/primed-summaries/window_output.json
@@ -125,19 +137,21 @@ If `accept` exits non-zero (malformed JSON, overlap, etc.), retry the same windo
 echo "cursor=<N> size=<M>" >> /tmp/primed-summaries/failed_windows.txt
 ```
 
-Loop back to 4a.
+Loop back to 5a.
 
-### 5. Finalize
+### 6. Finalize
 
 ```bash
 python3 dojo-prompts/scripts/srt_summarize.py finalize <output_path>
 ```
 
-Output path convention: `<original_stem>.summary.en.srt`, placed alongside the input SRT.
+Output path convention: `<original_stem>.summary.en.srt`, placed alongside the input file (the JSON or the SRT). Strip any source-language code (e.g. `.ja`) from the stem before appending `.summary.en.srt`.
 
 If `/tmp/primed-summaries/failed_windows.txt` exists, surface it to the user — those spans have placeholder summaries and may need a manual pass.
 
-### 6. Spot check
+If you generated an intermediate SRT from JSON in step 2, you can leave it in place — it's reusable by other workflows. **Never delete the Scribe JSON.**
+
+### 7. Spot check
 
 Read a few entries (beginning, middle, end) of the output SRT to verify timestamps span sensible ranges and summaries read as fluent English consistent with the premise.
 
