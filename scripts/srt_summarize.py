@@ -1,44 +1,91 @@
 #!/usr/bin/env python3
 """Helper for the primed-summaries skill.
 
-Drives a sliding-window summarization loop where Claude (in the harness)
+Drives a sliding-window summarization loop where the agent (in the harness)
 acts as the AI for each window. Python handles SRT parsing, window state,
-JSON validation, contiguity repair, and final SRT assembly — Claude only
+JSON validation, contiguity repair, and final SRT assembly — the agent only
 reads window inputs and writes JSON outputs.
 
+One episode subagent runs the whole pipeline against its own isolated work
+dir (so several episodes can run in parallel without clobbering each other).
+Select the work dir with the global `--work-dir <path>` flag (or the
+`PRIMED_SUMMARIES_DIR` env var); it defaults to /tmp/primed-summaries.
+
 Modes:
+    make-workdir <input_path>      Print WORKDIR/OUTPUT/OUTPUT_ALT for an input.
     prepare <input_path>           Parse Scribe JSON or SRT, init state.
     next-window [source_language]  Build window brief (premise + recent + window).
     accept <json_path>             Validate/repair JSON, advance cursor.
+    fallback                       Force-accept the current window with placeholder
+                                   summaries and log it to failed_windows.txt.
     finalize <output_srt_path>     Build final summary SRT from accepted chunks.
 
 `prepare` accepts either a Scribe JSON (preferred — split on punctuation,
-speaker change, or long pauses) or an SRT (one block = one sentence).
-The premise subagent writes premise.txt directly; this helper reads it.
+speaker change, or long pauses) or an SRT (one block = one sentence). It also
+clears stale state in the work dir, guarded by a `.primed-summaries-workdir`
+ownership marker so it can never delete unrelated files. The episode subagent
+writes premise.txt directly; this helper reads it.
 
-State files in /tmp/primed-summaries/:
+State files in the work dir (default /tmp/primed-summaries/):
+    .primed-summaries-workdir  Ownership marker (this dir is ours to clean).
     blocks.json     Parsed SRT blocks: [{index, timecode, text}, ...]
     state.json      {cursor, total, accepted: [{start, end, summary}, ...]}
-    premise.txt     2-4 sentence premise written by the premise subagent.
-    window_brief.txt  Per-window brief consumed by the window subagent.
+    premise.txt     2-4 sentence premise written by the episode subagent.
+    window_brief.txt   Per-window brief consumed by the episode subagent.
+    window_output.json Per-window JSON written by the episode subagent.
+    full_transcript.txt  Numbered transcript for premise + language detection.
+    failed_windows.txt   Spans that fell back to placeholder summaries.
 """
 
+import hashlib
 import json
 import os
 import re
 import sys
+import time
 
 WINDOW_SIZE = 40
 CORE_SIZE = 25
 RECENT_SUMMARIES = 3
+LONG_INPUT_WINDOWS = 40  # est. windows above which we warn about episode length
 SENTENCE_ENDERS = frozenset('。！？!?')
 PAUSE_THRESHOLD = 1.0  # seconds — gap between words that forces a sentence break
-STATE_DIR = '/tmp/primed-summaries'
-BLOCKS_PATH = os.path.join(STATE_DIR, 'blocks.json')
-STATE_PATH = os.path.join(STATE_DIR, 'state.json')
-PREMISE_PATH = os.path.join(STATE_DIR, 'premise.txt')
-BRIEF_PATH = os.path.join(STATE_DIR, 'window_brief.txt')
-FULL_TRANSCRIPT_PATH = os.path.join(STATE_DIR, 'full_transcript.txt')
+PLACEHOLDER_SUMMARY = '[summary unavailable — review this span]'
+FALLBACK_CHUNK_SIZE = 5  # sentences per chunk when forcing a fallback window
+MARKER_NAME = '.primed-summaries-workdir'
+
+DEFAULT_STATE_DIR = '/tmp/primed-summaries'
+
+# Source-language code suffixes stripped from a stem (lowercased, extensible).
+LANG_CODE_SUFFIXES = frozenset({
+    'ja', 'jp', 'ko', 'zh', 'zh-hans', 'zh-hant', 'zh-cn', 'zh-tw', 'en', 'es',
+    'pt', 'pt-br', 'fr', 'de', 'it', 'ru', 'ar', 'hi', 'th', 'vi', 'id', 'tr',
+    'pl', 'nl', 'sv',
+})
+
+# Files the helper owns and may unlink during cleanup. Never rmtree the dir.
+STATE_FILE_NAMES = (
+    'blocks.json', 'state.json', 'premise.txt', 'window_brief.txt',
+    'window_output.json', 'full_transcript.txt', 'failed_windows.txt',
+)
+
+
+def set_work_dir(path):
+    """Rebind the module-level path globals to live under `path`."""
+    global STATE_DIR, BLOCKS_PATH, STATE_PATH, PREMISE_PATH, BRIEF_PATH
+    global FULL_TRANSCRIPT_PATH, FAILED_PATH, MARKER_PATH
+    STATE_DIR = path
+    BLOCKS_PATH = os.path.join(STATE_DIR, 'blocks.json')
+    STATE_PATH = os.path.join(STATE_DIR, 'state.json')
+    PREMISE_PATH = os.path.join(STATE_DIR, 'premise.txt')
+    BRIEF_PATH = os.path.join(STATE_DIR, 'window_brief.txt')
+    FULL_TRANSCRIPT_PATH = os.path.join(STATE_DIR, 'full_transcript.txt')
+    FAILED_PATH = os.path.join(STATE_DIR, 'failed_windows.txt')
+    MARKER_PATH = os.path.join(STATE_DIR, MARKER_NAME)
+
+
+# Seed paths from the env var (or default); --work-dir may override in main().
+set_work_dir(os.environ.get('PRIMED_SUMMARIES_DIR', DEFAULT_STATE_DIR))
 
 
 def _fmt_srt_time(seconds):
@@ -148,6 +195,136 @@ def parse_input(path):
     return parse_srt(path)
 
 
+# ── naming helpers ─────────────────────────────────────────────────────────────
+
+def strip_lang_code(stem):
+    """Strip a trailing source-language code from a stem, if it is a known code.
+
+    `stem` is a basename with its final extension (.srt/.json) already removed.
+    Only the final dotted segment is considered, and only stripped when it is in
+    LANG_CODE_SUFFIXES (case-insensitive) — so non-language segments like
+    `.raw`, `.act`, or `.ova` are left intact. At most one segment is removed.
+    """
+    head, dot, last = stem.rpartition('.')
+    if dot and last.lower() in LANG_CODE_SUFFIXES:
+        return head
+    return stem
+
+
+def _sanitize_stem(stem):
+    """Lowercase a stem and map every non-[a-z0-9] char to '_'."""
+    return re.sub(r'[^a-z0-9]', '_', stem.lower())
+
+
+def cmd_make_workdir(input_path):
+    """Print WORKDIR / OUTPUT / OUTPUT_ALT lines for an input path.
+
+    Centralizes all name derivation so every caller produces identical paths.
+    Values are printed raw (one KEY=VALUE per line); callers must read
+    everything after the first '=' as the literal value and shell-quote it
+    themselves when building commands.
+    """
+    abs_path = os.path.realpath(input_path)
+    base = os.path.basename(abs_path)
+    full_stem = base.rsplit('.', 1)[0] if '.' in base else base
+    lang_stripped = strip_lang_code(full_stem)
+
+    h = hashlib.sha1(abs_path.encode('utf-8')).hexdigest()[:8]
+    episode_id = f'{_sanitize_stem(lang_stripped)}-{h}-{os.getpid()}-{time.monotonic_ns()}'
+    # Root the episode dir under the configured base (STATE_DIR honors
+    # PRIMED_SUMMARIES_DIR / --work-dir), defaulting to /tmp/primed-summaries.
+    workdir = os.path.join(STATE_DIR, episode_id)
+
+    input_dir = os.path.dirname(abs_path)
+    output = os.path.join(input_dir, f'{lang_stripped}.summary.en.srt')
+    output_alt = os.path.join(input_dir, f'{full_stem}.summary.en.srt')
+
+    print(f'WORKDIR={workdir}')
+    print(f'OUTPUT={output}')
+    print(f'OUTPUT_ALT={output_alt}')
+
+
+# ── work-dir validation & ownership-guarded cleanup ────────────────────────────
+
+def _validate_work_dir():
+    """Refuse to operate on dangerous work dirs (called before any cleanup)."""
+    raw = STATE_DIR
+    if not raw or not raw.strip():
+        print('ERROR: --work-dir is empty', file=sys.stderr)
+        sys.exit(2)
+    real = os.path.realpath(raw)
+    home = os.path.realpath(os.path.expanduser('~'))
+    if real == os.path.sep or os.path.dirname(real) == real:
+        print(f'ERROR: refusing to use filesystem root as work dir: {raw}', file=sys.stderr)
+        sys.exit(2)
+    if real == home:
+        print(f'ERROR: refusing to use $HOME as work dir: {raw}', file=sys.stderr)
+        sys.exit(2)
+    # Strip trailing separators first: os.path.islink('/tmp/link/') is False
+    # because the trailing slash resolves through the link.
+    norm = raw.rstrip(os.sep) or os.sep
+    if os.path.islink(norm):
+        print(f'ERROR: refusing to use a symlinked work dir: {raw}', file=sys.stderr)
+        sys.exit(2)
+
+
+def _prepare_work_dir():
+    """Create/clear the work dir, guarded by the ownership marker.
+
+    - Missing or empty dir  -> create, write marker, proceed.
+    - Marker present        -> owned; clear known state files, proceed.
+    - Non-empty, no marker  -> legacy migration if it is the default path and
+                               holds only known state files; else refuse.
+    """
+    _validate_work_dir()
+
+    if not os.path.exists(STATE_DIR):
+        os.makedirs(STATE_DIR, exist_ok=True)
+        _write_marker()
+        return
+
+    entries = os.listdir(STATE_DIR)
+    has_marker = MARKER_NAME in entries
+    non_marker = [e for e in entries if e != MARKER_NAME]
+
+    if not non_marker:
+        _write_marker()
+        return
+    if has_marker:
+        _clear_state_files()
+        return
+
+    # Non-empty, unmarked: only safe to adopt the legacy default dir when it
+    # contains nothing but our own known state files.
+    is_legacy_default = os.path.realpath(STATE_DIR) == os.path.realpath(DEFAULT_STATE_DIR)
+    only_known = all(e in STATE_FILE_NAMES for e in non_marker)
+    if is_legacy_default and only_known:
+        _clear_state_files()
+        _write_marker()
+        return
+
+    print(
+        f'ERROR: {STATE_DIR} is not a primed-summaries work dir '
+        f'(no {MARKER_NAME} marker and it contains other files). Refusing to touch it.',
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+
+def _write_marker():
+    with open(MARKER_PATH, 'w', encoding='utf-8') as f:
+        f.write('primed-summaries work dir — safe to clean.\n')
+
+
+def _clear_state_files():
+    for name in STATE_FILE_NAMES:
+        p = os.path.join(STATE_DIR, name)
+        try:
+            os.unlink(p)
+        except FileNotFoundError:
+            pass
+
+
 def load_state():
     with open(STATE_PATH, encoding='utf-8') as f:
         return json.load(f)
@@ -166,14 +343,15 @@ def load_blocks():
 # ── prepare ──────────────────────────────────────────────────────────────────
 
 def cmd_prepare(input_path):
-    os.makedirs(STATE_DIR, exist_ok=True)
+    # Parse first so we never disturb the work dir for an unusable input.
     blocks = parse_input(input_path)
     if not blocks:
         print(f'ERROR: no sentences found in {input_path}', file=sys.stderr)
         sys.exit(1)
+    _prepare_work_dir()
     with open(BLOCKS_PATH, 'w', encoding='utf-8') as f:
         json.dump(blocks, f, ensure_ascii=False)
-    # Also write a plain numbered transcript for the premise subagent
+    # Also write a plain numbered transcript for the premise / language-detection step
     with open(FULL_TRANSCRIPT_PATH, 'w', encoding='utf-8') as f:
         for i, b in enumerate(blocks, 1):
             f.write(f'{i}. {b["text"]}\n')
@@ -182,6 +360,12 @@ def cmd_prepare(input_path):
     est_windows = max(1, (len(blocks) + CORE_SIZE - 1) // CORE_SIZE)
     print(f'Prepared {len(blocks)} sentences. Estimated ~{est_windows} windows.')
     print(f'Full transcript written to {FULL_TRANSCRIPT_PATH}')
+    if est_windows > LONG_INPUT_WINDOWS:
+        print(
+            f'WARNING: ~{est_windows} windows is large for a single episode '
+            f'subagent context (>{LONG_INPUT_WINDOWS}). Consider splitting inputs '
+            f'longer than ~60-90 min into parts.'
+        )
 
 
 # ── next-window ──────────────────────────────────────────────────────────────
@@ -307,7 +491,15 @@ def cmd_accept(json_path):
         raw = '\n'.join(lines).strip()
     chunks = json.loads(raw)
     chunks = _parse_and_repair(chunks, batch_count)
+    accepted = _commit_window(state, chunks, cursor, total, is_final)
+    print(f"Accepted {len(accepted)} chunks. cursor={state['cursor']}/{total}")
 
+
+def _commit_window(state, chunks, cursor, total, is_final):
+    """Remap window-local chunks to global indices, apply the core-region
+    filter (unless final), append to state, and advance the cursor. Returns the
+    list of accepted chunks. Mutates and saves `state`.
+    """
     # Remap window-local 1-based to global 1-based
     for c in chunks:
         c['start'] += cursor
@@ -324,13 +516,61 @@ def cmd_accept(json_path):
             else:
                 break
         if not accepted:
-            # AI made one giant chunk; force-accept first to avoid infinite loop
+            # One giant chunk; force-accept first to avoid an infinite loop
             accepted.append(chunks[0])
 
-    state['accepted'].extend({'start': c['start'], 'end': c['end'], 'summary': str(c['summary']).strip()} for c in accepted)
+    state['accepted'].extend(
+        {'start': c['start'], 'end': c['end'], 'summary': str(c['summary']).strip()}
+        for c in accepted
+    )
     state['cursor'] = accepted[-1]['end']
     save_state(state)
-    print(f"Accepted {len(accepted)} chunks. cursor={state['cursor']}/{total}")
+    return accepted
+
+
+# ── fallback ──────────────────────────────────────────────────────────────────
+
+def cmd_fallback():
+    """Force-accept the current window with uniform placeholder chunks.
+
+    Used after repeated accept failures: writes FALLBACK_CHUNK_SIZE-sentence
+    chunks with a non-empty placeholder summary (so accept-style validation
+    passes), commits them, and logs the span to failed_windows.txt for a manual
+    revisit.
+    """
+    state = load_state()
+    cursor = state['cursor']
+    total = state['total']
+    if cursor >= total:
+        print('DONE — nothing to fall back on.')
+        return
+    window_end = min(cursor + WINDOW_SIZE, total)
+    is_final = (window_end == total)
+    batch_count = window_end - cursor
+
+    chunks = []
+    pos = 1
+    while pos <= batch_count:
+        end = min(pos + FALLBACK_CHUNK_SIZE - 1, batch_count)
+        chunks.append({'start': pos, 'end': end, 'summary': PLACEHOLDER_SUMMARY})
+        pos = end + 1
+
+    accepted = _commit_window(state, chunks, cursor, total, is_final)
+    # Log the sentences that ACTUALLY got placeholders. On a non-final window the
+    # core-region filter commits only a prefix, so the attempted window size
+    # (batch_count) would overstate the placeholder span.
+    placeholder_start = accepted[0]['start']
+    placeholder_end = accepted[-1]['end']
+    with open(FAILED_PATH, 'a', encoding='utf-8') as f:
+        f.write(
+            f'sentences {placeholder_start}-{placeholder_end} '
+            f'(attempted window {cursor + 1}-{window_end})\n'
+        )
+    print(
+        f'Fell back on placeholder summaries for sentences '
+        f'{placeholder_start}-{placeholder_end}. '
+        f"cursor={state['cursor']}/{total}. Logged to {FAILED_PATH}"
+    )
 
 
 # ── finalize ─────────────────────────────────────────────────────────────────
@@ -363,20 +603,60 @@ def cmd_finalize(output_path):
 
 # ── main ─────────────────────────────────────────────────────────────────────
 
+def _extract_work_dir(argv):
+    """Strip a `--work-dir <val>` / `--work-dir=<val>` flag from argv (in place).
+
+    Returns the remaining argv. Applies the work dir via set_work_dir() if the
+    flag is present. A bare `--work-dir` with no value, or `--work-dir=`, is a
+    hard error (never falls through to the default).
+    """
+    out = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == '--work-dir':
+            if i + 1 >= len(argv):
+                print('ERROR: --work-dir requires a value', file=sys.stderr)
+                sys.exit(2)
+            val = argv[i + 1]
+            if not val.strip():
+                print('ERROR: --work-dir value is empty', file=sys.stderr)
+                sys.exit(2)
+            set_work_dir(val)
+            i += 2
+            continue
+        if a.startswith('--work-dir='):
+            val = a[len('--work-dir='):]
+            if not val.strip():
+                print('ERROR: --work-dir value is empty', file=sys.stderr)
+                sys.exit(2)
+            set_work_dir(val)
+            i += 1
+            continue
+        out.append(a)
+        i += 1
+    return out
+
+
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
+    argv = _extract_work_dir(sys.argv[1:])
+    if not argv:
         print(__doc__, file=sys.stderr)
         sys.exit(2)
-    mode = sys.argv[1]
-    if mode == 'prepare':
-        cmd_prepare(sys.argv[2])
+    mode = argv[0]
+    if mode == 'make-workdir':
+        cmd_make_workdir(argv[1])
+    elif mode == 'prepare':
+        cmd_prepare(argv[1])
     elif mode == 'next-window':
-        lang = sys.argv[2] if len(sys.argv) > 2 else 'the source language'
+        lang = argv[1] if len(argv) > 1 else 'the source language'
         cmd_next_window(lang)
     elif mode == 'accept':
-        cmd_accept(sys.argv[2])
+        cmd_accept(argv[1])
+    elif mode == 'fallback':
+        cmd_fallback()
     elif mode == 'finalize':
-        cmd_finalize(sys.argv[2])
+        cmd_finalize(argv[1])
     else:
         print(f'Unknown mode: {mode}', file=sys.stderr)
         sys.exit(2)
