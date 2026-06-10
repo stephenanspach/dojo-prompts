@@ -36,6 +36,39 @@ import time
 import requests
 
 
+# ── Retry helper ──────────────────────────────────────────────────────────────
+
+RETRY_STATUSES = {429, 500, 502, 503, 504}
+
+
+def request_with_retries(make_request, what: str, attempts: int = 4):
+    """Run make_request() (a zero-arg callable returning a Response), retrying
+    with exponential backoff on transient failures: connection errors, timeouts,
+    and 429/5xx statuses.
+
+    STT accounts have low concurrency limits (as low as 2 concurrent jobs on
+    some plans), and an over-limit upload surfaces as a connection reset
+    mid-POST rather than a clean 429 -- so the exception path matters as much
+    as the status-code path.
+    """
+    delay = 10
+    for attempt in range(1, attempts + 1):
+        try:
+            resp = make_request()
+        except (requests.ConnectionError, requests.Timeout) as e:
+            failure = f"{type(e).__name__}: {e}"
+        else:
+            if resp.status_code not in RETRY_STATUSES:
+                return resp
+            failure = f"HTTP {resp.status_code}: {resp.text[:200]}"
+        if attempt == attempts:
+            sys.exit(f"{what} failed after {attempts} attempts: {failure}")
+        print(f"{what}: {failure} -- retrying in {delay}s "
+              f"(attempt {attempt}/{attempts})", file=sys.stderr)
+        time.sleep(delay)
+        delay *= 2
+
+
 # ── ElevenLabs Scribe ─────────────────────────────────────────────────────────
 
 def transcribe_elevenlabs(audio_path: str, language: str) -> dict:
@@ -45,19 +78,23 @@ def transcribe_elevenlabs(audio_path: str, language: str) -> dict:
     if not key:
         sys.exit("ELEVENLABS_API_KEY is not set.")
 
-    with open(audio_path, "rb") as f:
-        resp = requests.post(
-            "https://api.elevenlabs.io/v1/speech-to-text",
-            headers={"xi-api-key": key},
-            data={
-                "model_id": "scribe_v2",
-                "language_code": language,
-                "timestamps_granularity": "word",
-                "diarize": "true",
-            },
-            files={"file": f},
-            timeout=3600,
-        )
+    def post():
+        # Reopen per attempt: a failed upload leaves the file handle mid-stream.
+        with open(audio_path, "rb") as f:
+            return requests.post(
+                "https://api.elevenlabs.io/v1/speech-to-text",
+                headers={"xi-api-key": key},
+                data={
+                    "model_id": "scribe_v2",
+                    "language_code": language,
+                    "timestamps_granularity": "word",
+                    "diarize": "true",
+                },
+                files={"file": f},
+                timeout=3600,
+            )
+
+    resp = request_with_retries(post, "ElevenLabs transcription")
     if not resp.ok:
         sys.exit(f"ElevenLabs error {resp.status_code}: {resp.text[:500]}")
     return resp.json()
@@ -77,42 +114,58 @@ def transcribe_soniox(audio_path: str, language: str) -> dict:
     auth = {"Authorization": f"Bearer {key}"}
 
     # 1. upload
-    with open(audio_path, "rb") as f:
-        r = requests.post(f"{SONIOX_API}/files", headers=auth,
-                          files={"file": f}, timeout=3600)
+    def upload():
+        # Reopen per attempt: a failed upload leaves the file handle mid-stream.
+        with open(audio_path, "rb") as f:
+            return requests.post(f"{SONIOX_API}/files", headers=auth,
+                                 files={"file": f}, timeout=3600)
+
+    r = request_with_retries(upload, "Soniox upload")
     if not r.ok:
         sys.exit(f"Soniox upload error {r.status_code}: {r.text[:500]}")
     file_id = r.json()["id"]
 
     # 2. create transcription
-    r = requests.post(
-        f"{SONIOX_API}/transcriptions",
-        headers={**auth, "Content-Type": "application/json"},
-        json={
-            "model": "stt-async-v4",
-            "file_id": file_id,
-            "language_hints": [language],
-            "enable_speaker_diarization": True,
-        },
-        timeout=120,
-    )
+    def create():
+        return requests.post(
+            f"{SONIOX_API}/transcriptions",
+            headers={**auth, "Content-Type": "application/json"},
+            json={
+                "model": "stt-async-v4",
+                "file_id": file_id,
+                "language_hints": [language],
+                "enable_speaker_diarization": True,
+            },
+            timeout=120,
+        )
+
+    r = request_with_retries(create, "Soniox create")
     if not r.ok:
         sys.exit(f"Soniox create error {r.status_code}: {r.text[:500]}")
     tid = r.json()["id"]
 
     # 3. poll until done
     status = None
+    detail = ""
     for _ in range(1800):  # up to ~1h at 2s intervals
-        r = requests.get(f"{SONIOX_API}/transcriptions/{tid}", headers=auth, timeout=60)
-        status = r.json().get("status")
+        try:
+            r = requests.get(f"{SONIOX_API}/transcriptions/{tid}", headers=auth, timeout=60)
+            status = r.json().get("status")
+            detail = r.text[:500]
+        except (requests.RequestException, ValueError):
+            pass  # transient; keep polling
         if status in ("completed", "error"):
             break
         time.sleep(2)
     if status != "completed":
-        sys.exit(f"Soniox transcription did not complete: status={status} detail={r.text[:500]}")
+        sys.exit(f"Soniox transcription did not complete: status={status} detail={detail}")
 
     # 4. fetch transcript
-    r = requests.get(f"{SONIOX_API}/transcriptions/{tid}/transcript", headers=auth, timeout=120)
+    def fetch():
+        return requests.get(f"{SONIOX_API}/transcriptions/{tid}/transcript",
+                            headers=auth, timeout=120)
+
+    r = request_with_retries(fetch, "Soniox transcript fetch")
     if not r.ok:
         sys.exit(f"Soniox transcript error {r.status_code}: {r.text[:500]}")
     raw = r.json()

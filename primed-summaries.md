@@ -47,9 +47,9 @@ and collects each subagent's short result.
 
 This is **consistent regardless of episode count**: the per-episode pipeline is
 identical whether there is 1 input or 20. The only thing that varies is
-concurrency — if the agent can run independent sub-tasks at once, spawn the
-episode subagents in parallel; otherwise run them sequentially. Either way the
-result is the same.
+concurrency — if the agent can run independent sub-tasks at once, run episode
+subagents in parallel **capped at 3 at a time**; otherwise run them
+sequentially. Either way the result is the same.
 
 The window loop runs **inline inside each episode subagent** — it does *not* spawn
 further subagents (one level of subagent nesting only). The Python helper
@@ -123,11 +123,20 @@ risk parallel clobbering.
 ### 4. Spawn one episode subagent per input
 
 Spawn a subagent (Task tool, `subagent_type: "general-purpose"`) for each episode.
-The subagent inherits the current session's model — do not specify one. If the
-agent supports concurrent sub-tasks, spawn them in parallel; otherwise run them
-one at a time. Give each subagent the **episode subagent prompt** below, filled
-in with that episode's `WORKDIR`, input path, chosen output path, and the source
-language (if the user supplied one).
+The subagent inherits the current session's model — do not specify one. Give each
+subagent the **episode subagent prompt** below, filled in with that episode's
+`WORKDIR`, input path, chosen output path, and the source language (if the user
+supplied one).
+
+**Concurrency cap: never run more than 3 episode subagents at once.** For larger
+batches, process in waves — spawn up to 3, wait for all of them to return, then
+spawn the next wave. If the agent cannot run sub-tasks concurrently, run episodes
+one at a time. Do not spawn one subagent per input up front.
+
+**Batch confirmation: if there are more than 5 inputs**, stop and confirm with
+the user before spawning anything — tell them the episode count, that the batch
+will run in waves of 3, and that a large batch is a significant token/usage
+commitment. Let them choose all episodes or a subset.
 
 ### 5. Collect results
 
@@ -206,6 +215,8 @@ Inputs you were given:
 - **Never read transcript text into the main (orchestrator) context** — only
   episode subagents touch transcript, SRT bodies, or JSON contents.
 - **One subagent per episode; windows run inline** — do not nest subagents.
+- **At most 3 episode subagents at a time** — larger batches run in waves, and
+  more than 5 inputs require user confirmation before spawning anything.
 - **Consistent behavior for 1 or N episodes** — only concurrency varies.
 - **Helper owns naming and cleanup** — get paths from `make-workdir`, never build
   output names by hand, and never `rm -rf` a work dir.

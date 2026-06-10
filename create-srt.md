@@ -58,6 +58,7 @@ This produces `<video_stem>.json` (e.g., `kikai_onchi_01.mp4` → `kikai_onchi_0
 Notes:
 - **ElevenLabs** is a single synchronous request. Files up to 3GB; longer videos can take a few minutes.
 - **Soniox** runs an async job (upload → transcribe → poll). The helper handles polling and deletes the uploaded file from your account when done.
+- **Transcribe one file at a time.** STT accounts have low concurrency limits, and concurrent uploads fail with mid-upload connection resets. For multiple videos, run transcriptions sequentially — never in parallel subagents. (The helper retries transient failures with backoff, but it cannot beat an over-limit account.)
 - Do not request `additional_formats` — we build the SRT ourselves from the raw word data.
 
 ### What the output looks like

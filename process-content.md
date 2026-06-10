@@ -80,6 +80,8 @@ Rules for renaming:
 
 **Transcribe** — This always runs. Use the **create-srt** skill's steps 1-2 to transcribe each video with the chosen speech-to-text provider (ElevenLabs Scribe v2 or Soniox) and produce the transcript JSON file. Read `create-srt.md` (in the same directory as this file). The JSON is the foundation for all other outputs.
 
+> **Transcription is strictly sequential — one video at a time, in the main context.** Never spawn parallel subagents to transcribe multiple videos at once: speech-to-text accounts have low concurrency limits (as low as 2 concurrent jobs on some plans), so parallel uploads fail with mid-upload connection resets and burn usage on retries. Parallelism (e.g. primed-summaries episode subagents) is only allowed for steps that run **after** every transcript JSON exists on disk.
+
 > Because this step runs without further interaction, **ask which provider to use (and confirm the matching API key is set) back in step 1**, together with the question about which outputs they want — don't pause mid-run to ask.
 
 **Japanese subtitles** (if selected) — Run `srt_watch.py` on the JSON with `-o` to name the output after the video file:
