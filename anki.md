@@ -76,11 +76,13 @@ ffprobe -v error -select_streams s -show_entries stream=index:stream_tags=langua
 **Requires [mattvsjapan's fork](https://github.com/mattvsjapan/subs2cia) — see "Required Fork" section above.**
 
 ```bash
+# -d MUST be a LOCAL temp dir (WORK="$(mktemp -d /tmp/anki_build.XXXXXX)"), NEVER a
+# path under Content/ (iCloud). See "Execution Steps" for the full copy-back flow.
 # With JSON (preferred — MeCab sentence segmentation)
-subs2cia srs -i "video.mp4" "transcript.json" -p 500 -N -d out_srs --export-header-row
+subs2cia srs -i "video.mp4" "transcript.json" -p 500 -N -d "$WORK/out_srs" --export-header-row
 
 # With SRT (fallback)
-subs2cia srs -b -i "*.mp4" -ai 0 -si 0 -p 500 -N -d out_srs --export-header-row
+subs2cia srs -b -i "*.mp4" -ai 0 -si 0 -p 500 -N -d "$WORK/out_srs" --export-header-row
 ```
 
 ### Parameters Explained
@@ -94,7 +96,7 @@ subs2cia srs -b -i "*.mp4" -ai 0 -si 0 -p 500 -N -d out_srs --export-header-row
 | `-si` | `0` | Subtitle stream index (only needed with embedded tracks) |
 | `-p` | `500` | Padding in ms around each subtitle line |
 | `-N` | - | Normalize audio levels |
-| `-d` | `out_srs` | Output directory name |
+| `-d` | `"$WORK/out_srs"` | Output dir — MUST be a local `/tmp` dir, never under `Content/` (iCloud) |
 | `--export-header-row` | - | Include column headers in TSV output |
 
 ## Workflow
@@ -220,7 +222,8 @@ This is a line from 博音 (Bo Yin Podcast), a conversational Mandarin Chinese p
 After combining TSVs, package everything into an Anki .apkg file using the `apkg_export.py` script:
 
 ```bash
-python3 dojo-prompts/scripts/apkg_export.py out_srs/combined.tsv out_srs/ "${SHOW_NAME}" "$SOURCE_DIR"
+python3 dojo-prompts/scripts/apkg_export.py "$WORK/out_srs/combined.tsv" "$WORK/out_srs/" "${SHOW_NAME}" "$WORK"
+cp "$WORK/${SHOW_NAME}.apkg" "$SOURCE_DIR/"   # copy ONLY the final deck to iCloud
 ```
 
 ### APKG Notes
@@ -235,7 +238,7 @@ python3 dojo-prompts/scripts/apkg_export.py out_srs/combined.tsv out_srs/ "${SHO
 The final output is a single file in the source directory:
 - **`<show_name>.apkg`** - complete Anki deck with all audio and screenshot files embedded, ready for direct import into Anki
 
-All intermediate files (TSVs, audio clips, screenshots, the `out_srs/` directory) are deleted after the .apkg is created.
+All intermediate files (TSVs, audio clips, screenshots, the `out_srs/` directory) live in the **local `$WORK` temp dir** and are deleted after the `.apkg` is copied to the source dir — nothing heavy is ever written under `Content/` (iCloud).
 
 ## Adjustments
 
