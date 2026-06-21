@@ -188,14 +188,12 @@ mp.add_key_binding("n", "toggle-primed-listening", function()
     set_enabled(not enabled)
 end)
 
-for _, mod in ipairs({ "CMD", "Meta" }) do
-    mp.add_key_binding(mod .. "+n", "increase-ppc-" .. mod, function()
-        pause_per_char = pause_per_char + 0.01
-        show_ppc()
-    end)
-    mp.add_key_binding(mod .. "+b", "decrease-ppc-" .. mod, function()
-        pause_per_char = math.max(min_ppc, pause_per_char - 0.01)
-        show_ppc()
-    end)
-end
+mp.add_key_binding("Meta+n", "increase-ppc", function()
+    pause_per_char = pause_per_char + 0.01
+    show_ppc()
+end)
+mp.add_key_binding("Meta+b", "decrease-ppc", function()
+    pause_per_char = math.max(min_ppc, pause_per_char - 0.01)
+    show_ppc()
+end)
 ------------------------------------------------------------------
