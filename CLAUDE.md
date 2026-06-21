@@ -17,6 +17,8 @@ When the user asks about any of the following, read the corresponding skill file
 | "find my mistakes", "analyze my output", "what am I doing wrong" | `dojo-prompts/find-mistakes.md` |
 | "condensed audio", "condense this", "passive listening" | `dojo-prompts/condensed-audio.md` |
 | "primed summaries", "summarize subs", "english previews", "primed listening summaries" | `dojo-prompts/primed-summaries.md` |
+| "sync wanikani", "import wanikani words", "mark wanikani words known" | `dojo-prompts/wanikani-sync.md` |
+| "sync migaku", "import migaku words", "mark migaku words known" | `dojo-prompts/migaku-sync.md` |
 | "download a video", "download this" | Use yt-dlp (see below) |
 
 When a skill is triggered, read the full skill file first, then follow its workflow step by step.
