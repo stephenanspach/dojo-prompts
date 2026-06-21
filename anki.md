@@ -107,8 +107,8 @@ subs2cia srs -b -i "*.mp4" -ai 0 -si 0 -p 500 -N -d out_srs --export-header-row
 6. Run subs2cia with JSON input (preferred) or subtitle track indices (fallback)
 7. **Generate episode summaries** - for each TSV, read subtitle text and generate a translation briefing (see Episode Summary Format below), then prepend it to every row's `context` column. Use subagents to process TSVs in parallel, **at most 3 at a time** — for larger batches, run waves of 3, not one subagent per TSV up front.
 8. **Combine all TSV files** into a single `combined.tsv`
-9. **Export as .apkg** - package the combined TSV and all media files into an Anki .apkg deck, saved to the source directory
-10. **Clean up** - delete the `out_srs/` directory and all intermediate files, leaving only the .apkg. If an `.anki.srt` was generated from a transcript JSON file, delete it too — the SRT is an intermediate artifact, not a final output. **Do NOT delete the transcript JSON file** — it may be needed by other workflows.
+9. **Export as .apkg** - package the combined TSV and all media files into an Anki .apkg deck **inside the local temp dir**, then copy ONLY the finished `.apkg` to the source directory (the source dir is on iCloud — see Execution Steps).
+10. **Clean up** - delete the entire local temp working dir (`$WORK`) and all its intermediate files, leaving only the `.apkg` in the source dir. If an `.anki.srt` was generated from a transcript JSON file, delete it too — the SRT is an intermediate artifact, not a final output. **Do NOT delete the transcript JSON file** — it may be needed by other workflows.
 11. Report the output location to the user
 
 ## File Naming Convention
@@ -133,8 +133,14 @@ Rules for `<show_name>`:
 ## Execution Steps
 
 ```bash
-# 1. Store the source folder
+# 1. Store the source folder (the Content library lives on iCloud Drive)
 SOURCE_DIR="/path/to/source"
+
+# 1b. CRITICAL: do all heavy intermediate work in a LOCAL temp dir, NOT on iCloud.
+#     subs2cia writes thousands of clip/screenshot files; doing that inside the
+#     iCloud-synced Content folder makes I/O crawl and can stall the build for hours.
+#     Only the final .apkg is copied back to $SOURCE_DIR.
+WORK="$(mktemp -d /tmp/anki_build.XXXXXX)"
 
 # 2. Check for JSON files first, then SRT/ASS, then embedded tracks
 ls "$SOURCE_DIR"/*.json 2>/dev/null
@@ -151,11 +157,12 @@ for f in *.mp4; do
   mv "$f" "${SHOW_NAME}_${num}.mp4"
 done
 
-# 4. Run subs2cia — prefer JSON, fall back to SRT
+# 4. Run subs2cia — write ALL output to the LOCAL temp dir ($WORK), never to iCloud.
+#    For very long videos (movies / 2 hr+), also add --no-export-screenshot to halve the work.
 # With JSON (preferred):
-subs2cia srs -i "video.mp4" "transcript.json" -p 500 -N -d out_srs --export-header-row
+subs2cia srs -i "video.mp4" "transcript.json" -p 500 -N -d "$WORK/out_srs" --export-header-row
 # With SRT (fallback):
-subs2cia srs -b -i "*.mp4" -ai <audio_index> -si <subtitle_index> -p 500 -N -d out_srs --export-header-row
+subs2cia srs -b -i "*.mp4" -ai <audio_index> -si <subtitle_index> -p 500 -N -d "$WORK/out_srs" --export-header-row
 
 # 5. Generate episode summaries and prepend to context column
 #    Launch subagents (one per TSV, at most 3 at a time) to:
@@ -165,18 +172,18 @@ subs2cia srs -b -i "*.mp4" -ai <audio_index> -si <subtitle_index> -p 500 -N -d o
 #    Use this Python snippet to apply the summary to a single TSV:
 
 # EPISODE_SUMMARY should be set per-file after reading and summarizing the text
-python3 dojo-prompts/scripts/prepend_summary.py out_srs/<filename>.tsv "EPISODE_SUMMARY_HERE"
+python3 dojo-prompts/scripts/prepend_summary.py "$WORK/out_srs"/<filename>.tsv "EPISODE_SUMMARY_HERE"
 
-# 6. Combine all TSV files into a single file
+# 6. Combine all TSV files into a single file (still in the temp dir)
 # Use head -q to suppress ==> filename <== separators between files
-head -q -1 out_srs/*.tsv | head -1 > out_srs/combined.tsv && tail -n +2 -q out_srs/*.tsv >> out_srs/combined.tsv
+head -q -1 "$WORK/out_srs"/*.tsv | head -1 > "$WORK/out_srs/combined.tsv" && tail -n +2 -q "$WORK/out_srs"/*.tsv >> "$WORK/out_srs/combined.tsv"
 
-# 7. Export as .apkg
-#    Output goes to $SOURCE_DIR/<show_name>.apkg
-python3 dojo-prompts/scripts/apkg_export.py out_srs/combined.tsv out_srs/ "${SHOW_NAME}" "$SOURCE_DIR"
+# 7. Export the .apkg INTO the temp dir, then copy ONLY the final file to the iCloud source dir
+python3 dojo-prompts/scripts/apkg_export.py "$WORK/out_srs/combined.tsv" "$WORK/out_srs/" "${SHOW_NAME}" "$WORK"
+cp "$WORK/${SHOW_NAME}.apkg" "$SOURCE_DIR/"
 
-# 8. Clean up intermediate files
-rm -rf out_srs/
+# 8. Clean up the entire local temp dir (clips, screenshots, flac, tsv all live here)
+rm -rf "$WORK"
 
 # 9. Report location of output
 ls -la "$SOURCE_DIR/${SHOW_NAME}.apkg"

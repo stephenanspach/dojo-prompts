@@ -57,21 +57,24 @@ ffprobe -v error -select_streams s -show_entries stream=index:stream_tags=langua
 **CRITICAL:** Always pass `--no-gen-subtitle` — we only want the MP3, not a condensed subtitle file.
 
 ```bash
+# Work in a LOCAL temp dir — never write subs2cia output inside the iCloud Content folder.
+WORK="$(mktemp -d /tmp/condense.XXXXXX)"
+
 # With JSON (preferred)
-subs2cia condense -i "video.mp4" "video.json" -t 1500 -p 200 --no-gen-subtitle -d out_condense
+subs2cia condense -i "video.mp4" "video.json" -t 1500 -p 200 --no-gen-subtitle -d "$WORK/out_condense"
 
 # With external SRT (fallback)
-subs2cia condense -i "video.mp4" -si 0 --no-gen-subtitle -d out_condense
+subs2cia condense -i "video.mp4" -si 0 --no-gen-subtitle -d "$WORK/out_condense"
 ```
 
 For YouTube downloads, use `-ai 0` to explicitly select the first audio stream rather than `-tl ja` — yt-dlp sometimes mislabels audio stream languages.
 
 ### 4. Move and clean up
 
-Move the condensed MP3 out of the output directory and into the source directory, then delete the output directory:
+Move the condensed MP3 out of the local temp dir into the source directory, then delete the temp dir:
 ```bash
-mv out_condense/*.mp3 "${VIDEO_DIR}/"
-rm -rf out_condense/
+mv "$WORK"/out_condense/*.mp3 "${VIDEO_DIR}/"
+rm -rf "$WORK"
 ```
 
 **Do NOT delete the transcript JSON file** — it may be needed by other workflows.
