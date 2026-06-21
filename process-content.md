@@ -57,7 +57,16 @@ Wait for the user to answer before starting any work.
 
 ### 2. Run everything
 
-Once you have the URL and know what they want, execute all steps in sequence without further interaction.
+Once you have the URL and know what they want, execute the steps without further interaction.
+
+**Parallelize independent steps to cut wall-clock time.** Only one ordering is required:
+transcription runs **first** and **strictly one file at a time** (STT concurrency limits). Everything
+else depends only on the transcript JSON, so once the JSON exists the **Anki deck (subs2cia)**, the
+**condensed audio (subs2cia)**, and the **English translation** are mutually independent — run them
+**concurrently**: kick off the subs2cia Anki/condense builds as background shell jobs while the
+English-translation chunk subagents run, then assemble each as it finishes. (The Japanese SRT is a
+fast local step you can slot in anytime after the JSON.) Keep the subagent concurrency cap (≤3 at a
+time), and remember subs2cia output goes to a local `/tmp` dir, not iCloud.
 
 **Download** with yt-dlp:
 

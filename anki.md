@@ -79,10 +79,10 @@ ffprobe -v error -select_streams s -show_entries stream=index:stream_tags=langua
 # -d MUST be a LOCAL temp dir (WORK="$(mktemp -d /tmp/anki_build.XXXXXX)"), NEVER a
 # path under Content/ (iCloud). See "Execution Steps" for the full copy-back flow.
 # With JSON (preferred — MeCab sentence segmentation)
-subs2cia srs -i "video.mp4" "transcript.json" -p 500 -N -d "$WORK/out_srs" --export-header-row
+subs2cia srs -i "video.mp4" "transcript.json" -p 500 -N --no-export-screenshot -d "$WORK/out_srs" --export-header-row
 
 # With SRT (fallback)
-subs2cia srs -b -i "*.mp4" -ai 0 -si 0 -p 500 -N -d "$WORK/out_srs" --export-header-row
+subs2cia srs -b -i "*.mp4" -ai 0 -si 0 -p 500 -N --no-export-screenshot -d "$WORK/out_srs" --export-header-row
 ```
 
 ### Parameters Explained
@@ -160,11 +160,12 @@ for f in *.mp4; do
 done
 
 # 4. Run subs2cia — write ALL output to the LOCAL temp dir ($WORK), never to iCloud.
-#    For very long videos (movies / 2 hr+), also add --no-export-screenshot to halve the work.
+#    Screenshots are OFF by default (--no-export-screenshot) for speed + smaller decks;
+#    the listening card is audio-front, text+context back. To include screenshots, drop the flag.
 # With JSON (preferred):
-subs2cia srs -i "video.mp4" "transcript.json" -p 500 -N -d "$WORK/out_srs" --export-header-row
+subs2cia srs -i "video.mp4" "transcript.json" -p 500 -N --no-export-screenshot -d "$WORK/out_srs" --export-header-row
 # With SRT (fallback):
-subs2cia srs -b -i "*.mp4" -ai <audio_index> -si <subtitle_index> -p 500 -N -d "$WORK/out_srs" --export-header-row
+subs2cia srs -b -i "*.mp4" -ai <audio_index> -si <subtitle_index> -p 500 -N --no-export-screenshot -d "$WORK/out_srs" --export-header-row
 
 # 5. Generate episode summaries and prepend to context column
 #    Launch subagents (one per TSV, at most 3 at a time) to:
@@ -230,13 +231,13 @@ cp "$WORK/${SHOW_NAME}.apkg" "$SOURCE_DIR/"   # copy ONLY the final deck to iClo
 - The model uses a **listening card** template: front = audio only, back = text + context
 - Deck and model IDs are derived from the show name so re-importing updates existing cards rather than creating duplicates
 - The `genanki` package must be installed (`pip3 install genanki`)
-- Screenshots are exported by default by subs2cia (disable with `--no-export-screenshot`)
+- Screenshots are **disabled by default** in this workflow (`--no-export-screenshot`) for speed and deck size; `apkg_export.py` handles their absence (the image field is left empty). To include them, drop the flag.
 - The TSV column names (`audioclip`, `screenclip`, `text`, `context`) come from subs2cia's `--export-header-row` output. The `audioclip` column contains `[sound:filename.mp3]` format and `screenclip` contains `<img src='filename.jpg'>` format — both need parsing to extract the bare filename.
 
 ## Output
 
 The final output is a single file in the source directory:
-- **`<show_name>.apkg`** - complete Anki deck with all audio and screenshot files embedded, ready for direct import into Anki
+- **`<show_name>.apkg`** - complete Anki deck with all audio clips embedded (screenshots off by default), ready for direct import into Anki
 
 All intermediate files (TSVs, audio clips, screenshots, the `out_srs/` directory) live in the **local `$WORK` temp dir** and are deleted after the `.apkg` is copied to the source dir — nothing heavy is ever written under `Content/` (iCloud).
 
