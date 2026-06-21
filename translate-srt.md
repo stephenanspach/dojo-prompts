@@ -33,7 +33,7 @@ If any required info is missing, ask the user.
 
 The flow is:
 1. Python script parses SRT → writes chunk input files + metadata JSON to `/tmp/translate-srt/`
-2. Parallel subagents each read one chunk file, translate, write one output file
+2. Translate each chunk file → write its output file (**inline in the main thread for small/medium files; parallel subagents only for large files** — see step 4)
 3. Python script reads all output files + metadata → writes final SRT
 
 This keeps the main context lean (only metadata + status messages).
@@ -76,9 +76,24 @@ cat /tmp/translate-srt/chunks.json | python3 -c "import json,sys; chunks=json.lo
 ```
 Every chunk must show `input exists: True`. If not, the split script failed — fix it before continuing.
 
-### 4. Launch Parallel Subagents
+### 4. Translate the chunks — INLINE for small/medium files, subagents only for large
 
-Use the `Task` tool with `subagent_type: "general-purpose"` and `run_in_background: true` to launch chunk subagents in parallel, **at most 3 at a time** — launch up to 3 in a single message, wait for their completion notifications, then launch the next 3. Do not launch all chunks at once: a long video can produce dozens of chunks, and a large subagent fan-out hits API rate limits and is hard to recover when something fails mid-flight.
+**Decide by size first.** Each chunk subagent costs ~25–30k tokens, mostly fixed
+overhead, so spawning 8–10 of them to translate a typical video is wasteful.
+
+- **Small / medium files (≤ ~800 blocks — most videos up to ~45 min): translate INLINE,
+  no subagents.** For each `chunk_N_input.txt`, read it yourself, translate the blocks
+  between `=== TRANSLATE THE FOLLOWING ===` and `=== END TRANSLATE ===` following the
+  CRITICAL RULES below, and write the output (exactly `num_blocks` blocks separated by
+  `---BLOCK_SEP---`) to `chunk_N_output.txt`. Do every chunk in the main thread, then go
+  straight to reassembly (step 6). This skips all per-subagent overhead and is far cheaper
+  in tokens — the win the user cares about. (Still split in step 2 so reassembly's
+  line-balancing/timecode mapping and the exact block-count check apply.)
+
+- **Large files (> ~800 blocks — long podcasts, movies): use background subagents** for the
+  parallel wall-clock speedup, as described next.
+
+For the large-file case, use the `Task` tool with `subagent_type: "general-purpose"` and `run_in_background: true` to launch chunk subagents in parallel, **at most 3 at a time** — launch up to 3 in a single message, wait for their completion notifications, then launch the next 3. Do not launch all chunks at once: a long video can produce dozens of chunks, and a large subagent fan-out hits API rate limits and is hard to recover when something fails mid-flight.
 
 Each subagent receives a prompt like:
 
@@ -113,7 +128,9 @@ Write ONLY the translated blocks (with ---BLOCK_SEP--- separators) to
 {chunk_output_path}. No extra text, no explanations, no headers.
 ```
 
-### 5. Wait for Completion
+### 5. Wait for Completion (subagent path only)
+
+*(Inline path: skip this step — you already wrote every chunk output yourself; go to step 6.)*
 
 **Do NOT poll output file existence.** A file existing on disk does not mean the agent has finished writing to it — reading a partially-written file produces corrupted/truncated output. Instead, wait for all background agent completion notifications before proceeding to reassembly. Only after every agent has reported completion should you move to step 6.
 
