@@ -1,2 +1,5 @@
 .DS_Store
 __pycache__/
+scripts/.wanikani_api_key
+*.api_key
+.*_api_key
