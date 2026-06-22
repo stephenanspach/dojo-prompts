@@ -90,4 +90,4 @@ output_path = os.path.join(dest_dir, deck_name + '.apkg')
 package = genanki.Package(deck)
 package.media_files = media_files
 package.write_to_file(output_path)
-print(f'Exported {len(media_files)} cards to {output_path}')
+print(f'Exported {len(deck.notes)} cards to {output_path}')
