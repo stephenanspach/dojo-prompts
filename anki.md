@@ -79,11 +79,13 @@ ffprobe -v error -select_streams s -show_entries stream=index:stream_tags=langua
 # -d MUST be a LOCAL temp dir (WORK="$(mktemp -d /tmp/anki_build.XXXXXX)"), NEVER a
 # path under Content/ (iCloud). See "Execution Steps" for the full copy-back flow.
 # With JSON (preferred — MeCab sentence segmentation)
-subs2cia srs -i "video.mp4" "transcript.json" -p 500 -N --no-export-screenshot -d "$WORK/out_srs" --export-header-row
+subs2cia srs -i "video.mp4" "transcript.json" -p 500 -N -d "$WORK/out_srs" --export-header-row
 
 # With SRT (fallback)
-subs2cia srs -b -i "*.mp4" -ai 0 -si 0 -p 500 -N --no-export-screenshot -d "$WORK/out_srs" --export-header-row
+subs2cia srs -b -i "*.mp4" -ai 0 -si 0 -p 500 -N -d "$WORK/out_srs" --export-header-row
 ```
+
+Screenshots are **on by default** — each card's back shows a frame from the line, which the user wants. For very long videos (movies / 2 hr+) you may add `--no-export-screenshot` to halve the work and shrink the deck (the image field is then left empty).
 
 ### Parameters Explained
 
@@ -144,6 +146,19 @@ SOURCE_DIR="/path/to/source"
 #     Only the final .apkg is copied back to $SOURCE_DIR.
 WORK="$(mktemp -d /tmp/anki_build.XXXXXX)"
 
+# 1c. CRITICAL for LONG videos (≳20 min): also copy the INPUTS into the local temp dir
+#     and run subs2cia from there. subs2cia demuxes the audio to an intermediate FLAC
+#     written NEXT TO THE INPUT file (-d only controls the FINAL output dir, not the
+#     demux scratch). If the input sits on iCloud, that FLAC lands on iCloud too, and on
+#     a long build iCloud can evict it mid-run — subs2cia then dies with
+#     "Error opening input ... .stream1.audio.*.flac: No such file or directory",
+#     producing a TRUNCATED deck (e.g. 60 of 928 cards). Copying inputs local keeps the
+#     demux FLAC off iCloud. Short clips (a few min) usually finish before iCloud
+#     interferes, but copying is always safe — do it whenever the video is long.
+mkdir -p "$WORK/in"
+cp "$SOURCE_DIR"/*.mp4 "$SOURCE_DIR"/*.json "$WORK/in/" 2>/dev/null   # long videos: run subs2cia against $WORK/in copies
+# (For short videos you may skip the copy and point -i directly at $SOURCE_DIR files.)
+
 # 2. Check for JSON files first, then SRT/ASS, then embedded tracks
 ls "$SOURCE_DIR"/*.json 2>/dev/null
 ls "$SOURCE_DIR"/*.srt "$SOURCE_DIR"/*.ass 2>/dev/null
@@ -160,12 +175,14 @@ for f in *.mp4; do
 done
 
 # 4. Run subs2cia — write ALL output to the LOCAL temp dir ($WORK), never to iCloud.
-#    Screenshots are OFF by default (--no-export-screenshot) for speed + smaller decks;
-#    the listening card is audio-front, text+context back. To include screenshots, drop the flag.
-# With JSON (preferred):
-subs2cia srs -i "video.mp4" "transcript.json" -p 500 -N --no-export-screenshot -d "$WORK/out_srs" --export-header-row
+#    For LONG videos point -i at the LOCAL input copies ($WORK/in/...) from step 1c so the
+#    demux FLAC also stays off iCloud (see 1c). Short clips may read from $SOURCE_DIR directly.
+#    Screenshots are ON by default — the listening card is audio-front, image+text+context back.
+#    For movies / 2 hr+ you may add --no-export-screenshot to halve the work + shrink the deck.
+# With JSON (preferred — long video, inputs copied local):
+subs2cia srs -i "$WORK/in/video.mp4" "$WORK/in/transcript.json" -p 500 -N -d "$WORK/out_srs" --export-header-row
 # With SRT (fallback):
-subs2cia srs -b -i "*.mp4" -ai <audio_index> -si <subtitle_index> -p 500 -N --no-export-screenshot -d "$WORK/out_srs" --export-header-row
+subs2cia srs -b -i "*.mp4" -ai <audio_index> -si <subtitle_index> -p 500 -N -d "$WORK/out_srs" --export-header-row
 
 # 5. Generate episode summaries and prepend to context column
 #    Launch subagents (one per TSV, at most 3 at a time) to:
@@ -228,16 +245,16 @@ cp "$WORK/${SHOW_NAME}.apkg" "$SOURCE_DIR/"   # copy ONLY the final deck to iClo
 ```
 
 ### APKG Notes
-- The model uses a **listening card** template: front = audio only, back = text + context
+- The model uses a **listening card** template: front = audio only, back = image (screenshot) + text + context
 - Deck and model IDs are derived from the show name so re-importing updates existing cards rather than creating duplicates
 - The `genanki` package must be installed (`pip3 install genanki`)
-- Screenshots are **disabled by default** in this workflow (`--no-export-screenshot`) for speed and deck size; `apkg_export.py` handles their absence (the image field is left empty). To include them, drop the flag.
+- Screenshots are **enabled by default** in this workflow — `apkg_export.py` embeds the per-line frame into the card's Image field. For movies / 2 hr+ you may add `--no-export-screenshot` for speed and deck size; `apkg_export.py` handles their absence (the image field is left empty).
 - The TSV column names (`audioclip`, `screenclip`, `text`, `context`) come from subs2cia's `--export-header-row` output. The `audioclip` column contains `[sound:filename.mp3]` format and `screenclip` contains `<img src='filename.jpg'>` format — both need parsing to extract the bare filename.
 
 ## Output
 
 The final output is a single file in the source directory:
-- **`<show_name>.apkg`** - complete Anki deck with all audio clips embedded (screenshots off by default), ready for direct import into Anki
+- **`<show_name>.apkg`** - complete Anki deck with all audio clips and screenshots embedded (screenshots on by default), ready for direct import into Anki
 
 All intermediate files (TSVs, audio clips, screenshots, the `out_srs/` directory) live in the **local `$WORK` temp dir** and are deleted after the `.apkg` is copied to the source dir — nothing heavy is ever written under `Content/` (iCloud).
 
@@ -254,3 +271,4 @@ All intermediate files (TSVs, audio clips, screenshots, the `out_srs/` directory
 - If subtitles are embedded, subs2cia extracts them automatically.
 - The .apkg is written directly to the source directory; all intermediate files are cleaned up automatically.
 - **Do not proactively check on background jobs.** When a long-running batch process is running in the background, do not poll for progress or read output files unless the user asks. This avoids wasting context window on progress bar output.
+- **Long videos: copy inputs to the local temp dir before running subs2cia** (see step 1c). subs2cia writes its demux scratch FLAC next to the *input*, not in `-d`; if the input is on iCloud, a long build can have that FLAC evicted mid-run and die with a `No such file or directory` on `...stream1.audio.*.flac`, yielding a truncated deck. Running against `$WORK/in/` copies avoids this. (Observed on the 30-min Ibaraki prefecture guide: first build died at card 60 of 928.)
