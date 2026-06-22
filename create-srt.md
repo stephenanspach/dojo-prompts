@@ -131,3 +131,4 @@ Key constants are defined in `scripts/srt_common.py` and `scripts/srt_watch.py`:
 | `GAP_THRESHOLD` | 0.1s | Time gap that forces a segment break between bunsetsu. |
 | `MERGE_GAP_LIMIT` | 0.4s | Segments this far apart are never merged into one line. |
 | `LINE_CHAR_LIMIT` | 18 | Max characters per subtitle line. |
+| `SUBTITLE_LEAD` | 0.4s | Shifts displayed subtitles this much **earlier** (both JA watch SRT and EN translated SRT) so a line appears just before it's spoken. Does not touch the transcript JSON, so Anki audio-clip timing is unaffected. Override per run with `SUBTITLE_LEAD_MS` (e.g. `SUBTITLE_LEAD_MS=0` to disable). |
