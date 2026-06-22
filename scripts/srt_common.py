@@ -5,6 +5,7 @@ Handles JSON loading, MeCab bunsetsu segmentation, and output writing.
 """
 
 import json
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,6 +54,13 @@ SENTENCE_ENDERS = frozenset("。！？!?")
 MERGE_GAP_LIMIT = 0.4  # seconds — segments this far apart can never be merged into one line
 LINE_CHAR_LIMIT = 18
 CUE_LINGER = 0.5  # seconds to extend cue end, if room before next cue
+
+# Shift displayed subtitles earlier so a line appears slightly before it is
+# spoken — easier to read along at natural speed. Applies to the watch SRT
+# (Japanese) and the translated SRT (English); both go through write_srt().
+# Does NOT affect the transcript JSON, so Anki audio-clip timing stays accurate.
+# Override per-run with the SUBTITLE_LEAD_MS env var (e.g. 0 to disable).
+SUBTITLE_LEAD = float(os.environ.get("SUBTITLE_LEAD_MS", "400")) / 1000.0
 
 
 @dataclass
@@ -454,8 +462,16 @@ def write_srt(cues: list[Cue], out_path: str):
             next_start = cues[i].start  # cues[i] is next since enumerate starts at 1
             end = min(end, next_start)
 
+        # Shift the whole cue earlier so the line shows before it's spoken.
+        # Shifting start and end by the same amount preserves duration and the
+        # gap to the next cue (which is shifted identically), so no overlaps.
+        start = max(0.0, cue.start - SUBTITLE_LEAD)
+        end = max(0.0, end - SUBTITLE_LEAD)
+        if end <= start:  # safety for a cue clamped against t=0
+            end = start + 0.001
+
         lines.append(str(i))
-        lines.append(f"{fmt_srt_time(cue.start)} --> {fmt_srt_time(end)}")
+        lines.append(f"{fmt_srt_time(start)} --> {fmt_srt_time(end)}")
         # Strip 。 only at the end of each line
         cue_lines = [ln.text.rstrip("。") for ln in cue.lines]
         # Add dash prefix when multiple speakers share a cue
