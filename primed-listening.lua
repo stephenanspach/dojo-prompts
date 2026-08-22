@@ -16,8 +16,8 @@
 ------------------------------------------------------------------
 
 --------------------------- DEFAULTS -----------------------------
-local pause_per_char = 0.06     -- seconds paused per WEIGHTED character
-                                -- (UTF-8 byte: kana/kanji ≈ 3, Latin = 1)
+local pause_per_char = 0.18     -- seconds paused per character
+                                -- (kana, kanji, and Latin all count as 1)
 local min_pause      = 0.50     -- never pause for less than this
 local min_chars      = 2        -- ignore subs shorter than this
 local min_ppc        = 0.01     -- floor for pause_per_char
@@ -69,14 +69,12 @@ local function visible_char_count(text)
     text = text:gsub("{.-}", ""):gsub("\\[Nn]", "")   -- strip ASS
                :gsub("%b()", ""):gsub("（[^）]*）", "")   -- remove (…) （…）
                :gsub("%s+", "")
-    -- Byte length, deliberately. None of mpv's supported Lua runtimes
-    -- (5.1 / 5.2 / LuaJIT) have the utf8 library, so this was always the
-    -- real behavior, and every pause_per_char value in the wild - including
-    -- the 0.06 default - was tuned against byte counts. Bytes also weight
-    -- kana/kanji 3x Latin letters, a fair proxy for reading effort. Do NOT
-    -- "fix" this to utf8.len: it would silently retime playback ~3x for
-    -- every existing install and saved config.
-    return #text
+    -- Count UTF-8 characters directly: every byte except continuation bytes
+    -- (0x80-0xBF) starts one character, so kana, kanji, and Latin all count
+    -- as 1. mpv's Lua runtimes (5.1 / 5.2 / LuaJIT) ship no utf8 library,
+    -- hence the manual count.
+    local _, count = text:gsub("[^\128-\191]", "")
+    return count
 end
 
 local function remove_pause_key_bindings()
