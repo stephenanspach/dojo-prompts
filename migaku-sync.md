@@ -36,21 +36,27 @@ Paths (Chrome **Default** profile):
 > pointer). The script falls back to the largest blob file in the store dir,
 > which is the current SQLite snapshot.
 
-## Automatic sync on Anki launch
+## Automatic sync
 
-A launchd agent runs this sync **whenever Anki launches**, via `WatchPaths` on
-`~/Library/Application Support/Anki2/prefs21.db` (Anki writes it on startup) —
-the same trigger the WaniKani sync uses. The script reads Chrome's IndexedDB
-**live** (no need to quit Chrome); the stale-blob fallback handles a mid-write
-database. Worst case a run reads a slightly stale snapshot or is skipped, and the
-next Anki launch catches up.
+A launchd agent runs this sync periodically, driven by **`StartInterval`
+(1800s / 30min) + `RunAtLoad`** — the same setup the WaniKani sync uses.
+`WatchPaths` on `~/Library/Application Support/Anki2/prefs21.db` is kept as a
+fast-path bonus trigger, but isn't relied on: it assumes Anki writes that
+file on every startup, which turned out to be false on current Anki
+versions (found 2026-09-09: no successful run for 4 days despite several
+Anki sessions in between, with no error — it just silently never fired).
+The script reads Chrome's IndexedDB **live** (no need to quit Chrome); the
+stale-blob fallback handles a mid-write database. Worst case a run reads a
+slightly stale snapshot or is skipped, and the next run (≤30min later)
+catches up.
 
 - Agent: `~/Library/LaunchAgents/com.mattvsjapan.migaku-sync.plist`
 - Log: `~/Library/Logs/mattvsjapan/mg.log` (local, NOT iCloud — launchd can't open a
   StandardOutPath on iCloud Drive; it fails with exit 78/EX_CONFIG before the
   script runs)
-- On launch, the script waits up to ~45s for AnkiConnect to come up (the
-  `prefs21.db` trigger can fire before the add-on starts listening).
+- The script waits up to ~60s for AnkiConnect's collection to actually be
+  loaded (probes `deckNames`, not just `version` — `version` answers before
+  the collection finishes loading on launch).
 
 ```bash
 launchctl list | grep migaku                                  # is it loaded?

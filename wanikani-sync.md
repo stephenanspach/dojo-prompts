@@ -55,13 +55,21 @@ State lives in `tracker/wanikani_sync_state.json`:
 Delete this file (or use `--full`) to force a complete re-sync. Re-runs are
 idempotent — already-added words are never duplicated.
 
-## Automatic sync on Anki launch
+## Automatic sync
 
-A launchd agent runs the sync **whenever Anki launches**. It does this via
-`WatchPaths` on `~/Library/Application Support/Anki2/prefs21.db`, which Anki
-writes on startup. `ThrottleInterval` (60s) prevents rapid re-fires. Because the
-sync is incremental and idempotent, an extra trigger (e.g. on Anki shutdown,
-which also touches the file) just no-ops.
+A launchd agent runs the sync periodically. It's driven by **`StartInterval`
+(1800s / 30min) + `RunAtLoad`**, not by watching for Anki to launch — an
+earlier version used `WatchPaths` on
+`~/Library/Application Support/Anki2/prefs21.db` on the theory that Anki
+writes that file on startup, but that turned out to be unreliable: on current
+Anki versions the file isn't touched on every launch, so the agent could go
+silently idle for days with no error (found 2026-09-09: no successful run
+since 2026-09-05 despite several intervening Anki sessions). `WatchPaths` is
+kept alongside as a fast-path bonus trigger, but `StartInterval` is the real
+guarantee. Because the sync is incremental, idempotent, and no-ops cleanly
+when Anki/AnkiConnect isn't reachable (`wait_for_anki` probes `deckNames`,
+which needs the collection loaded, not just `version`), polling every 30min
+is cheap and safe.
 
 - Agent: `~/Library/LaunchAgents/com.mattvsjapan.wanikani-sync.plist`
 - Log: `~/Library/Logs/mattvsjapan/wk.log` (local, NOT iCloud — launchd can't open a
