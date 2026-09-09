@@ -69,14 +69,14 @@ English-translation chunk subagents run, then assemble each as it finishes. (The
 fast local step you can slot in anytime after the JSON.) Keep the subagent concurrency cap (≤3 at a
 time), and remember subs2cia output goes to a local `/tmp` dir, not iCloud.
 
-**Process URL sources with yt-dlp** — pin the **H.264 (avc1)** video codec, never AV1 (AV1 makes subs2srs/subs2cia deck creation far slower; the selector falls back to any mp4, then AV1, only if H.264 is unavailable):
+**Process URL sources with yt-dlp** — grab the **highest quality available under 4K**: hard-exclude 2160p/4K+ (`height<2160`), then let resolution win over codec (1440p AV1/VP9 beats 1080p H.264 if that's what the video has), using H.264 only as a tie-breaker at equal resolution. `--cookies-from-browser chrome` uses the user's YouTube Premium session so Premium bonus-bitrate formats actually download instead of silently failing and falling back to a tiny legacy 360p file:
 
 ```bash
 # Single video
-yt-dlp -f "bv*[vcodec^=avc1]+ba[ext=m4a]/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]" --merge-output-format mp4 -o "%(title)s.%(ext)s" "URL"
+yt-dlp --cookies-from-browser chrome -f "bv*[height<2160]+ba[ext=m4a]/bv*[height<2160]+ba/b[height<2160]" -S "res,vcodec:h264" --merge-output-format mp4 -o "%(title)s.%(ext)s" "URL"
 
 # Playlist or channel
-yt-dlp -f "bv*[vcodec^=avc1]+ba[ext=m4a]/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]" --merge-output-format mp4 -o "%(playlist_index)03d_%(title)s.%(ext)s" "URL"
+yt-dlp --cookies-from-browser chrome -f "bv*[height<2160]+ba[ext=m4a]/bv*[height<2160]+ba/b[height<2160]" -S "res,vcodec:h264" --merge-output-format mp4 -o "%(playlist_index)03d_%(title)s.%(ext)s" "URL"
 ```
 
 If yt-dlp can't process the source directly, ask the user for a local file, subtitle file, or transcript and continue from there.

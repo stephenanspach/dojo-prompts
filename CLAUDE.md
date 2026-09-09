@@ -59,12 +59,12 @@ If a required tool is missing, just install it and move on. No need to ask — b
 
 ## Important
 
-- **Processing videos**: Always use yt-dlp and always produce MP4 with the **H.264 (avc1)** video codec — never AV1. AV1 is smaller but makes subs2srs/subs2cia deck creation far slower, so pin the codec (falls back to any mp4, then AV1, only if H.264 is unavailable). After yt-dlp writes the file, rename it with a romanized version of the full title (see `process-content.md` for detailed naming rules):
+- **Processing videos**: Always use yt-dlp and always produce MP4. Grab the **highest quality available under 4K** — hard-exclude 2160p/4K+ (`height<2160`), then let resolution win: pick the tallest tier below that (1440p if the video has it, else 1080p, etc.), using H.264 only as a tie-breaker at equal resolution (`-S "res,vcodec:h264"`), never as a resolution cap — AV1/VP9 at a higher resolution beats H.264 at a lower one. Pass `--cookies-from-browser chrome` (the user's YouTube Premium session) so Premium bonus-bitrate formats actually download instead of silently failing and falling back to a tiny legacy 360p file. After yt-dlp writes the file, rename it with a romanized version of the full title (see `process-content.md` for detailed naming rules):
   ```bash
   # Single video
-  yt-dlp -f "bv*[vcodec^=avc1]+ba[ext=m4a]/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]" --merge-output-format mp4 -o "%(title)s.%(ext)s" "URL"
+  yt-dlp --cookies-from-browser chrome -f "bv*[height<2160]+ba[ext=m4a]/bv*[height<2160]+ba/b[height<2160]" -S "res,vcodec:h264" --merge-output-format mp4 -o "%(title)s.%(ext)s" "URL"
   # Playlist or channel
-  yt-dlp -f "bv*[vcodec^=avc1]+ba[ext=m4a]/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]" --merge-output-format mp4 -o "%(playlist_index)03d_%(title)s.%(ext)s" "URL"
+  yt-dlp --cookies-from-browser chrome -f "bv*[height<2160]+ba[ext=m4a]/bv*[height<2160]+ba/b[height<2160]" -S "res,vcodec:h264" --merge-output-format mp4 -o "%(playlist_index)03d_%(title)s.%(ext)s" "URL"
   # Then rename to romanized lowercase with underscores
   # e.g. 「機械オンチに「API」を説明する動画」→ kikai_onchi_ni_api_wo_setsumei_suru_douga_01.mp4
   ```
