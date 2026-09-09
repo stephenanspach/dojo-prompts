@@ -64,7 +64,9 @@ sync is incremental and idempotent, an extra trigger (e.g. on Anki shutdown,
 which also touches the file) just no-ops.
 
 - Agent: `~/Library/LaunchAgents/com.mattvsjapan.wanikani-sync.plist`
-- Log: `tracker/wanikani_sync.log`
+- Log: `~/Library/Logs/mattvsjapan/wk.log` (local, NOT iCloud — launchd can't open a
+  StandardOutPath on iCloud Drive; it fails with exit 78/EX_CONFIG before the
+  script runs)
 
 Manage it:
 ```bash

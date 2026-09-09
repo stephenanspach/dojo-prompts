@@ -46,7 +46,9 @@ database. Worst case a run reads a slightly stale snapshot or is skipped, and th
 next Anki launch catches up.
 
 - Agent: `~/Library/LaunchAgents/com.mattvsjapan.migaku-sync.plist`
-- Log: `tracker/migaku_sync.log`
+- Log: `~/Library/Logs/mattvsjapan/mg.log` (local, NOT iCloud — launchd can't open a
+  StandardOutPath on iCloud Drive; it fails with exit 78/EX_CONFIG before the
+  script runs)
 - On launch, the script waits up to ~45s for AnkiConnect to come up (the
   `prefs21.db` trigger can fire before the add-on starts listening).
 

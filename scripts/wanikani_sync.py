@@ -101,12 +101,14 @@ def anki(action: str, **params):
     return body["result"]
 
 
-def wait_for_anki(timeout: float = 45.0, interval: float = 3.0) -> bool:
-    """Poll AnkiConnect until it responds or timeout elapses."""
+def wait_for_anki(timeout: float = 60.0, interval: float = 3.0) -> bool:
+    """Poll AnkiConnect until the collection is loaded, or timeout elapses.
+    Probes deckNames (which needs the collection) rather than version (which the
+    server answers before the collection finishes loading on launch)."""
     deadline = time.monotonic() + timeout
     while True:
         try:
-            anki("version")
+            anki("deckNames")
             return True
         except Exception:
             if time.monotonic() >= deadline:
