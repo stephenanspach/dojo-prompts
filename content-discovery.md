@@ -68,6 +68,18 @@ Filter recommendations based on two things: whether they match the person's tast
 
 Think about what makes content more or less comprehensible:
 - Visual support (can you follow along even if you miss words?)
+  - **VERIFY it's a real video, not audio with a static image.** Many "YouTube videos" are
+    actually podcast episodes uploaded as a single still frame / cover art — these have no
+    visual support and the user does not want them suggested as videos. Before recommending
+    anything as a video, confirm it has real footage by checking the format:
+    `yt-dlp -F "URL" | grep "video only" | tail -1`
+    - Real video → 16:9 (e.g. `1920x1080`, `1280x720`) at a normal bitrate (~1.5 Mbps+).
+    - Static-image podcast → **square** (`720x720`, `1080x1080`) at a tiny video bitrate
+      (~80–110 kbps). Reject these (or find the real-video version elsewhere).
+    - Some creators post BOTH: an audio/podcast version on one channel and a real-video
+      version on another. Always prefer and link the real-video upload. (Example: **Sayuri** —
+      the podcast channel `UCRaiffUW1Ur-5S2Gxu0m8xg` is static-image audio; her real travel
+      vlogs live on **"Sayuri Saying"** `UCqMY-cp1He6IAi1cIz-gX1g`.)
 - Speaking pace and clarity
 - Vocabulary domain (everyday life vs. technical/academic)
 - Repetition and predictability (daily vlogs vs. dense one-off lectures)
