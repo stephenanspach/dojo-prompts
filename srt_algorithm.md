@@ -185,7 +185,7 @@ The translate SRT is the input for the parallel translation pipeline (`translate
 - `fugashi` — Python MeCab binding
 - `unidic-lite` — MeCab dictionary (UniDic, not ipadic)
 
-Install: `pip install fugashi unidic-lite`
+Install: `python3 -m pip install --break-system-packages fugashi unidic-lite`
 
 ## Usage
 
@@ -202,5 +202,5 @@ Outputs:
 
 Anki card generation is handled directly by subs2cia:
 ```bash
-subs2cia srs -i video.mp4 transcript.json -p 500 -N -d out_srs --export-header-row
+python3 -m subs2cia srs -i video.mp4 transcript.json -p 500 -N -d out_srs --export-header-row
 ```

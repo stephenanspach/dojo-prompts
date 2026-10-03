@@ -22,7 +22,7 @@ Run `/condensed-audio` with a video file or directory path.
 
 - [mattvsjapan's fork of subs2cia](https://github.com/mattvsjapan/subs2cia) — **must be this fork**, not the original. Install/upgrade with:
   ```bash
-  pip install --upgrade git+https://github.com/mattvsjapan/subs2cia.git
+  python3 -m pip install --break-system-packages --upgrade git+https://github.com/mattvsjapan/subs2cia.git
   ```
 - ffmpeg and ffprobe on PATH
 
@@ -61,10 +61,10 @@ ffprobe -v error -select_streams s -show_entries stream=index:stream_tags=langua
 WORK="$(mktemp -d /tmp/condense.XXXXXX)"
 
 # With JSON (preferred)
-subs2cia condense -i "video.mp4" "video.json" -t 1500 -p 200 --no-gen-subtitle -d "$WORK/out_condense"
+python3 -m subs2cia condense -i "video.mp4" "video.json" -t 1500 -p 200 --no-gen-subtitle -d "$WORK/out_condense"
 
 # With external SRT (fallback)
-subs2cia condense -i "video.mp4" -si 0 --no-gen-subtitle -d "$WORK/out_condense"
+python3 -m subs2cia condense -i "video.mp4" -si 0 --no-gen-subtitle -d "$WORK/out_condense"
 ```
 
 For YouTube sources, use `-ai 0` to explicitly select the first audio stream rather than `-tl ja` — yt-dlp sometimes mislabels audio stream languages.

@@ -9,6 +9,8 @@ Arguments:
     media_dir  - Directory containing audio and screenshot files
     deck_name  - Name for the Anki deck (also used for output filename)
     dest_dir   - Directory to write the .apkg file to
+
+Screenshots are downscaled in place in media_dir to 640px wide (env SCREENSHOT_WIDTH; 0 disables).
 """
 
 import genanki
@@ -17,11 +19,27 @@ import os
 import re
 import sys
 import hashlib
+import shutil
+import subprocess
 
 tsv_path = sys.argv[1]
 media_dir = sys.argv[2]
 deck_name = sys.argv[3]
 dest_dir = sys.argv[4]
+
+SCREENSHOT_WIDTH = int(os.environ.get('SCREENSHOT_WIDTH', '640'))  # max px wide; 0 = keep original
+
+
+def downscale(path):
+    """Shrink a screenshot in place to SCREENSHOT_WIDTH (never upscales) to keep decks small."""
+    if not SCREENSHOT_WIDTH or not shutil.which('ffmpeg'):
+        return
+    tmp = path + '.tmp.jpg'
+    r = subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', path, '-vf',
+                        f"scale='min({SCREENSHOT_WIDTH},iw)':-2", '-q:v', '4', tmp])
+    if r.returncode == 0 and os.path.isfile(tmp):
+        os.replace(tmp, path)
+
 
 # Generate deterministic IDs from deck name so re-imports update existing cards
 deck_id = int(hashlib.md5(deck_name.encode()).hexdigest()[:8], 16)
@@ -71,6 +89,7 @@ with open(tsv_path, encoding='utf-8') as f:
             image_filename = screenshot_html.split("src='")[1].split("'")[0]
             image_path = os.path.join(media_dir, image_filename)
             if os.path.isfile(image_path):
+                downscale(image_path)
                 image_field = '<img src="' + image_filename + '">'
                 media_files.append(image_path)
 

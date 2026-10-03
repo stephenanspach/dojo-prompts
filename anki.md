@@ -79,10 +79,10 @@ ffprobe -v error -select_streams s -show_entries stream=index:stream_tags=langua
 # -d MUST be a LOCAL temp dir (WORK="$(mktemp -d /tmp/anki_build.XXXXXX)"), NEVER a
 # path under Content/ (iCloud). See "Execution Steps" for the full copy-back flow.
 # With JSON (preferred — MeCab sentence segmentation)
-subs2cia srs -i "video.mp4" "transcript.json" -p 500 -N -d "$WORK/out_srs" --export-header-row
+python3 -m subs2cia srs -i "video.mp4" "transcript.json" -p 500 -N -d "$WORK/out_srs" --export-header-row
 
 # With SRT (fallback)
-subs2cia srs -b -i "*.mp4" -ai 0 -si 0 -p 500 -N -d "$WORK/out_srs" --export-header-row
+python3 -m subs2cia srs -b -i "*.mp4" -ai 0 -si 0 -p 500 -N -d "$WORK/out_srs" --export-header-row
 ```
 
 Screenshots are **on by default** — each card's back shows a frame from the line, which the user wants. For very long videos (movies / 2 hr+) you may add `--no-export-screenshot` to halve the work and shrink the deck (the image field is then left empty).
@@ -180,9 +180,9 @@ done
 #    Screenshots are ON by default — the listening card is audio-front, image+text+context back.
 #    For movies / 2 hr+ you may add --no-export-screenshot to halve the work + shrink the deck.
 # With JSON (preferred — long video, inputs copied local):
-subs2cia srs -i "$WORK/in/video.mp4" "$WORK/in/transcript.json" -p 500 -N -d "$WORK/out_srs" --export-header-row
+python3 -m subs2cia srs -i "$WORK/in/video.mp4" "$WORK/in/transcript.json" -p 500 -N -d "$WORK/out_srs" --export-header-row
 # With SRT (fallback):
-subs2cia srs -b -i "*.mp4" -ai <audio_index> -si <subtitle_index> -p 500 -N -d "$WORK/out_srs" --export-header-row
+python3 -m subs2cia srs -b -i "*.mp4" -ai <audio_index> -si <subtitle_index> -p 500 -N -d "$WORK/out_srs" --export-header-row
 
 # 5. Generate episode summaries and prepend to context column
 #    Launch subagents (one per TSV, at most 3 at a time) to:
@@ -195,11 +195,12 @@ subs2cia srs -b -i "*.mp4" -ai <audio_index> -si <subtitle_index> -p 500 -N -d "
 python3 dojo-prompts/scripts/prepend_summary.py "$WORK/out_srs"/<filename>.tsv "EPISODE_SUMMARY_HERE"
 
 # 6. Combine all TSV files into a single file (still in the temp dir)
-# Use head -q to suppress ==> filename <== separators between files
-head -q -1 "$WORK/out_srs"/*.tsv | head -1 > "$WORK/out_srs/combined.tsv" && tail -n +2 -q "$WORK/out_srs"/*.tsv >> "$WORK/out_srs/combined.tsv"
+# Write combined.tsv OUTSIDE out_srs/: if it sits in the *.tsv glob, the command reads its own
+# output and grows forever (hit 52 GB once). awk keeps the first header only; macOS head has no -q.
+awk 'FNR==1 && NR!=1 {next} {print}' "$WORK/out_srs"/*.tsv > "$WORK/combined.tsv"
 
 # 7. Export the .apkg INTO the temp dir, then copy ONLY the final file to the iCloud source dir
-python3 dojo-prompts/scripts/apkg_export.py "$WORK/out_srs/combined.tsv" "$WORK/out_srs/" "${SHOW_NAME}" "$WORK"
+python3 dojo-prompts/scripts/apkg_export.py "$WORK/combined.tsv" "$WORK/out_srs/" "${SHOW_NAME}" "$WORK"
 cp "$WORK/${SHOW_NAME}.apkg" "$SOURCE_DIR/"
 
 # 8. Clean up the entire local temp dir (clips, screenshots, flac, tsv all live here)
@@ -240,7 +241,7 @@ This is a line from 博音 (Bo Yin Podcast), a conversational Mandarin Chinese p
 After combining TSVs, package everything into an Anki .apkg file using the `apkg_export.py` script:
 
 ```bash
-python3 dojo-prompts/scripts/apkg_export.py "$WORK/out_srs/combined.tsv" "$WORK/out_srs/" "${SHOW_NAME}" "$WORK"
+python3 dojo-prompts/scripts/apkg_export.py "$WORK/combined.tsv" "$WORK/out_srs/" "${SHOW_NAME}" "$WORK"
 cp "$WORK/${SHOW_NAME}.apkg" "$SOURCE_DIR/"   # copy ONLY the final deck to iCloud
 ```
 

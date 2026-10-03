@@ -44,7 +44,7 @@ Then immediately ask what outputs they want:
 >
 > You can pick any combination.
 
-Also ask **which speech-to-text provider to use — ElevenLabs Scribe v2 or Soniox** — and make sure the matching API key is set (`$ELEVENLABS_API_KEY` or `$SONIOX_API_KEY`). Ask this now so the run doesn't pause mid-way.
+Also make sure `$ELEVENLABS_API_KEY` is set (transcription uses ElevenLabs Scribe v2 only); if not, ask for it now so the run doesn't pause mid-way.
 
 **If the URL is a playlist or channel, confirm the scale up front.** Check how many videos it contains:
 
@@ -69,14 +69,14 @@ English-translation chunk subagents run, then assemble each as it finishes. (The
 fast local step you can slot in anytime after the JSON.) Keep the subagent concurrency cap (≤3 at a
 time), and remember subs2cia output goes to a local `/tmp` dir, not iCloud.
 
-**Process URL sources with yt-dlp** — grab the **highest quality available under 4K**: hard-exclude 2160p/4K+ (`height<2160`), then let resolution win over codec (1440p AV1/VP9 beats 1080p H.264 if that's what the video has), using H.264 only as a tie-breaker at equal resolution. `--cookies-from-browser chrome` uses the user's YouTube Premium session so Premium bonus-bitrate formats actually download instead of silently failing and falling back to a tiny legacy 360p file:
+**Process URL sources with yt-dlp** — **cap at 1080p** (`height<=1080`; never 1440p/4K — it only bloats the file and the Anki deck), using H.264 as a tie-breaker at equal resolution. `--cookies-from-browser chrome` uses the user's YouTube Premium session so Premium bonus-bitrate formats actually download instead of silently failing and falling back to a tiny legacy 360p file:
 
 ```bash
 # Single video
-yt-dlp --cookies-from-browser chrome -f "bv*[height<2160]+ba[ext=m4a]/bv*[height<2160]+ba/b[height<2160]" -S "res,vcodec:h264" --merge-output-format mp4 -o "%(title)s.%(ext)s" "URL"
+yt-dlp --cookies-from-browser chrome -f "bv*[height<=1080]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]" -S "res,vcodec:h264" --merge-output-format mp4 -o "%(title)s.%(ext)s" "URL"
 
 # Playlist or channel
-yt-dlp --cookies-from-browser chrome -f "bv*[height<2160]+ba[ext=m4a]/bv*[height<2160]+ba/b[height<2160]" -S "res,vcodec:h264" --merge-output-format mp4 -o "%(playlist_index)03d_%(title)s.%(ext)s" "URL"
+yt-dlp --cookies-from-browser chrome -f "bv*[height<=1080]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]" -S "res,vcodec:h264" --merge-output-format mp4 -o "%(playlist_index)03d_%(title)s.%(ext)s" "URL"
 ```
 
 If yt-dlp can't process the source directly, ask the user for a local file, subtitle file, or transcript and continue from there.
@@ -85,24 +85,26 @@ If yt-dlp can't process the source directly, ask the user for a local file, subt
 
 **Skip renaming if** the filename is already ASCII-safe (no CJK characters, no Unicode punctuation, no special characters that break shell tools). For example, `goldman_sachs_money_mate_01.mp4` is fine as-is.
 
-**Rename if** the filename contains Japanese/Chinese/Korean characters or problematic Unicode. Create a **romanized version of the full title** — not a shortened or translated summary:
-- 「機械オンチに「API」を説明する動画」 → `kikai_onchi_ni_api_wo_setsumei_suru_douga`
-- 「ゆる言語学ラジオ」 → `yuru_gengogaku_radio`
-- 「ゴールドマン・サックス マネーメイト」 → `goldman_sachs_money_mate`
+**Rename if** the filename contains Japanese/Chinese/Korean characters or problematic Unicode. Create a **short romanized name** — a few key words, not the whole title:
+- 「機械オンチに「API」を説明する動画」 → `Kikai_onchi_api`
+- 「ゆる言語学ラジオ」 → `Yuru_gengogaku_radio`
+- 「ゴールドマン・サックス マネーメイト」 → `Goldman_sachs_money_mate`
 
-Rules for renaming:
-- All lowercase
-- Romanize Japanese fully — do not strip it down to just the English/ASCII parts
+Rules for renaming (folder names follow the same rules):
+- Start with a capital letter; the rest lowercase
+- Romanize the key words — don't translate them
 - Underscores for spaces and punctuation
 - Keep English words as-is (e.g. `api`, `radio`)
 - Include season/year if relevant (e.g., `_s2`, `_2024`)
 - Only add episode numbers (`_01`, `_02`) when there are **multiple videos** in a series. A single standalone video does not need a number suffix.
 
-**Transcribe** — This always runs. Use the **create-srt** skill's steps 1-2 to transcribe each video with the chosen speech-to-text provider (ElevenLabs Scribe v2 or Soniox) and produce the transcript JSON file. Read `create-srt.md` (in the same directory as this file). The JSON is the foundation for all other outputs.
+**Transcribe** — This always runs. Use the **create-srt** skill's steps 1-2 to transcribe each video with ElevenLabs Scribe v2 and produce the transcript JSON file. Read `create-srt.md` (in the same directory as this file). The JSON is the foundation for all other outputs.
 
 > **Transcription is strictly sequential — one video at a time, in the main context.** Never spawn parallel subagents to transcribe multiple videos at once: speech-to-text accounts have low concurrency limits (as low as 2 concurrent jobs on some plans), so parallel uploads fail with mid-upload connection resets and burn usage on retries. Parallelism (e.g. primed-summaries episode subagents) is only allowed for steps that run **after** every transcript JSON exists on disk — and even then, never more than 3 concurrent subagents.
 
-> Because this step runs without further interaction, **ask which provider to use (and confirm the matching API key is set) back in step 1**, together with the question about which outputs they want — don't pause mid-run to ask.
+> Because this step runs without further interaction, **confirm `$ELEVENLABS_API_KEY` is set back in step 1**, together with the question about which outputs they want — don't pause mid-run to ask.
+
+**Bilingual videos (English narration mixed with Japanese, e.g. Takashii street interviews):** STT with `--language ja` renders the English as unspaced Latin junk ("I'mTakashifromJapan") that becomes bad subtitle lines and Anki cards. Right after transcribing, run `python3 dojo-prompts/scripts/strip_english.py <json>` (drops English-speech runs, keeps short Latin words like AI/USA; original saved as `.orig.json`), then continue with the stripped JSON.
 
 **Japanese subtitles** (if selected) — Run `srt_watch.py` on the JSON with `-o` to name the output after the video file:
 ```bash
