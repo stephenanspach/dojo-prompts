@@ -19,7 +19,7 @@ AnkiMorphs setup recognizes them as known words.
 
 - **Anki must be open** (the [AnkiConnect](https://foosoft.net/projects/anki-connect/)
   add-on serves the API at `http://localhost:8765`).
-- `requests` Python package (`python3.14 -m pip install requests --break-system-packages`).
+- `requests` Python package (`python3.15 -m pip install requests --break-system-packages`).
 - A WaniKani API key. The script reads it from the `WANIKANI_API_KEY` env var,
   or falls back to the file `dojo-prompts/scripts/.wanikani_api_key`
   (chmod 600; not meant to be shared). Get/regenerate a key at
@@ -29,8 +29,8 @@ AnkiMorphs setup recognizes them as known words.
 
 ```bash
 cd "/Users/spach/Library/Mobile Documents/com~apple~CloudDocs/Japanese/mattvsjapan"
-python3.14 dojo-prompts/scripts/wanikani_sync.py          # incremental (normal)
-python3.14 dojo-prompts/scripts/wanikani_sync.py --full   # re-check everything
+python3.15 dojo-prompts/scripts/wanikani_sync.py          # incremental (normal)
+python3.15 dojo-prompts/scripts/wanikani_sync.py --full   # re-check everything
 ```
 
 ## What it does

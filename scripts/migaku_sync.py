@@ -9,9 +9,9 @@ knownStatus is KNOWN, and creates one 🇯🇵 MvJ note per word in Anki, tagged
 _card-status::i+0-manually so AnkiMorphs treats them as known.
 
 Usage:
-    python3.14 migaku_sync.py            # sync new known words into Anki
-    python3.14 migaku_sync.py --dump     # just print the known-word count and exit
-    python3.14 migaku_sync.py --lang ja  # language filter (default: ja)
+    python3.15 migaku_sync.py            # sync new known words into Anki
+    python3.15 migaku_sync.py --dump     # just print the known-word count and exit
+    python3.15 migaku_sync.py --lang ja  # language filter (default: ja)
 
 Requires: ccl_chromium_reader, requests. Anki must be open (AnkiConnect).
 For the most consistent read, quit Chrome first — the script works with Chrome

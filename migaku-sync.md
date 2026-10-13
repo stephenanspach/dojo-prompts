@@ -72,9 +72,15 @@ launchctl load   ~/Library/LaunchAgents/com.mattvsjapan.migaku-sync.plist  # re-
 
 ## Prerequisites
 
-- `ccl_chromium_reader`: `python3.14 -m pip install --break-system-packages git+https://github.com/cclgroupltd/ccl_chromium_reader.git`
+- `ccl_chromium_reader`: `python3.15 -m pip install --break-system-packages git+https://github.com/cclgroupltd/ccl_chromium_reader.git`
 - `requests`.
 - **Anki open** (AnkiConnect at `localhost:8765`).
+- **Full Disk Access** for the launchd run (reading Chrome's IndexedDB is
+  TCC-protected). Grant it to the real Homebrew Cellar paths, not the
+  `/opt/homebrew/bin` symlink: both `…/Python.framework/Versions/3.15/bin/python3.15`
+  and `…/Versions/3.15/Resources/Python.app`. The paths include the exact
+  version (`Cellar/python@3.15/3.15.0/`), so every Homebrew Python upgrade
+  needs the new paths re-added.
 - Chrome may be open or closed. For a manual run where you want the most
   consistent possible read, quitting Chrome (Cmd+Q) first guarantees the
   database isn't mid-write — but it's optional.
@@ -83,9 +89,9 @@ launchctl load   ~/Library/LaunchAgents/com.mattvsjapan.migaku-sync.plist  # re-
 
 ```bash
 cd "/Users/spach/Library/Mobile Documents/com~apple~CloudDocs/Japanese/mattvsjapan"
-python3.14 dojo-prompts/scripts/migaku_sync.py          # sync into Anki
-python3.14 dojo-prompts/scripts/migaku_sync.py --dump   # just print known words, no Anki writes
-python3.14 dojo-prompts/scripts/migaku_sync.py --lang ja # language filter (default ja)
+python3.15 dojo-prompts/scripts/migaku_sync.py          # sync into Anki
+python3.15 dojo-prompts/scripts/migaku_sync.py --dump   # just print known words, no Anki writes
+python3.15 dojo-prompts/scripts/migaku_sync.py --lang ja # language filter (default ja)
 ```
 
 ## What it writes
