@@ -14,7 +14,7 @@ allowed-tools:
 Pulls every word Migaku marks as **KNOWN** and creates a `🇯🇵 MvJ` note for each
 in Anki, tagged `_card-status::i+0-manually` so the AnkiMorphs setup recognizes
 them as known words. Sibling of the WaniKani sync — same note type, same tag,
-into deck **`_Ankimorphs database::Migaku Known`**.
+into deck **`…Ankimorphs database::Migaku Known`**.
 
 ## How the data is obtained (no public API)
 
@@ -96,7 +96,7 @@ python3.15 dojo-prompts/scripts/migaku_sync.py --lang ja # language filter (defa
 
 ## What it writes
 
-For each new known word, a `🇯🇵 MvJ` note in `_Ankimorphs database::Migaku Known`
+For each new known word, a `🇯🇵 MvJ` note in `…Ankimorphs database::Migaku Known`
 with the word in `Sentence` (required first field), `Word`, and `am-study-morphs`
 (the field AnkiMorphs reads), tagged `_card-status::i+0-manually`. Words already
 marked known anywhere in Anki (e.g. from the WaniKani sync) are skipped.

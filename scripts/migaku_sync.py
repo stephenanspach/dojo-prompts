@@ -33,9 +33,10 @@ from ccl_chromium_reader import ccl_chromium_indexeddb as idb
 
 # ── Config ────────────────────────────────────────────────────────────────────
 ANKICONNECT_URL = "http://localhost:8765"
-# Parent deck for known-word notes. Renamed with a leading "_" so it sorts to
-# the bottom; the old name is still used if Anki hasn't been renamed yet.
-DECK_PARENTS = ("_Ankimorphs database", "Ankimorphs database")
+# Parent deck for known-word notes: the top-level deck whose name ends in
+# "Ankimorphs database". The user prefixes it with sort characters (currently
+# U+E83A + "_") so it sorts last, so match the suffix, never an exact name.
+DECK_PARENT_SUFFIX = "Ankimorphs database"
 DECK_LEAF = "Migaku Known"
 NOTE_TYPE = "🇯🇵 MvJ"
 KNOWN_TAG = "_card-status::i+0-manually"
@@ -146,11 +147,13 @@ def anki(action: str, **params):
 
 def deck_name() -> str:
     """Full known-words deck name under whichever parent deck exists."""
-    names = anki("deckNames")
-    for parent in DECK_PARENTS:
-        if parent in names:
-            return f"{parent}::{DECK_LEAF}"
-    return f"{DECK_PARENTS[0]}::{DECK_LEAF}"
+    parents = sorted({n for n in anki("deckNames")
+                      if "::" not in n and n.endswith(DECK_PARENT_SUFFIX)})
+    if len(parents) != 1:
+        raise RuntimeError(
+            f"Expected exactly one top-level deck ending in {DECK_PARENT_SUFFIX!r}, "
+            f"found {parents!r}")
+    return f"{parents[0]}::{DECK_LEAF}"
 
 
 def wait_for_anki(timeout: float = 60.0, interval: float = 3.0) -> bool:
