@@ -24,7 +24,10 @@ import requests
 # ── Config ────────────────────────────────────────────────────────────────────
 WANIKANI_BASE = "https://api.wanikani.com/v2"
 ANKICONNECT_URL = "http://localhost:8765"
-DECK_NAME = "Ankimorphs database::WaniKani Known"
+# Parent deck for known-word notes. Renamed with a leading "_" so it sorts to
+# the bottom; the old name is still used if Anki hasn't been renamed yet.
+DECK_PARENTS = ("_Ankimorphs database", "Ankimorphs database")
+DECK_LEAF = "WaniKani Known"
 NOTE_TYPE = "🇯🇵 MvJ"
 KNOWN_TAG = "_card-status::i+0-manually"
 # SRS stages: 5=Guru1, 6=Guru2, 7=Master, 8=Enlightened, 9=Burned
@@ -99,6 +102,15 @@ def anki(action: str, **params):
     if body.get("error"):
         raise RuntimeError(f"AnkiConnect [{action}]: {body['error']}")
     return body["result"]
+
+
+def deck_name() -> str:
+    """Full known-words deck name under whichever parent deck exists."""
+    names = anki("deckNames")
+    for parent in DECK_PARENTS:
+        if parent in names:
+            return f"{parent}::{DECK_LEAF}"
+    return f"{DECK_PARENTS[0]}::{DECK_LEAF}"
 
 
 def wait_for_anki(timeout: float = 60.0, interval: float = 3.0) -> bool:
@@ -187,6 +199,7 @@ def main():
     known_words = existing_known_words()
     print(f"  {len(known_words)} word(s) already marked known in Anki")
 
+    deck = deck_name()
     notes_to_add = []
     chars_seen_this_run: set[str] = set()
 
@@ -211,7 +224,7 @@ def main():
             primary = meanings[0]["meaning"]
 
         notes_to_add.append({
-            "deckName": DECK_NAME,
+            "deckName": deck,
             "modelName": NOTE_TYPE,
             # Sentence is the first field and cannot be empty; am-study-morphs is
             # the field AnkiMorphs reads to mark the word known.
@@ -238,7 +251,7 @@ def main():
         return
 
     # Ensure deck exists
-    anki("createDeck", deck=DECK_NAME)
+    anki("createDeck", deck=deck)
 
     # Add notes in batches of 100
     print(f"Adding {len(notes_to_add)} note(s) to Anki...")

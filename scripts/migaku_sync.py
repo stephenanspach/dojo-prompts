@@ -33,7 +33,10 @@ from ccl_chromium_reader import ccl_chromium_indexeddb as idb
 
 # ── Config ────────────────────────────────────────────────────────────────────
 ANKICONNECT_URL = "http://localhost:8765"
-DECK_NAME = "Ankimorphs database::Migaku Known"
+# Parent deck for known-word notes. Renamed with a leading "_" so it sorts to
+# the bottom; the old name is still used if Anki hasn't been renamed yet.
+DECK_PARENTS = ("_Ankimorphs database", "Ankimorphs database")
+DECK_LEAF = "Migaku Known"
 NOTE_TYPE = "🇯🇵 MvJ"
 KNOWN_TAG = "_card-status::i+0-manually"
 
@@ -141,6 +144,15 @@ def anki(action: str, **params):
     return body["result"]
 
 
+def deck_name() -> str:
+    """Full known-words deck name under whichever parent deck exists."""
+    names = anki("deckNames")
+    for parent in DECK_PARENTS:
+        if parent in names:
+            return f"{parent}::{DECK_LEAF}"
+    return f"{DECK_PARENTS[0]}::{DECK_LEAF}"
+
+
 def wait_for_anki(timeout: float = 60.0, interval: float = 3.0) -> bool:
     """Poll AnkiConnect until the collection is loaded, or timeout elapses.
     Probes deckNames (which needs the collection) rather than version (which the
@@ -213,10 +225,11 @@ def main():
         save_state(state)
         return
 
-    anki("createDeck", deck=DECK_NAME)
+    deck = deck_name()
+    anki("createDeck", deck=deck)
 
     notes = [{
-        "deckName": DECK_NAME,
+        "deckName": deck,
         "modelName": NOTE_TYPE,
         # Sentence is the required first field; am-study-morphs is what AnkiMorphs reads.
         "fields": {"Sentence": w, "Word": w, "am-study-morphs": w},

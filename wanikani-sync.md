@@ -39,7 +39,7 @@ python3.15 dojo-prompts/scripts/wanikani_sync.py --full   # re-check everything
   `vocabulary` and `kana_vocabulary` only — **kanji are skipped** (single
   characters, not words).
 - For each new item, adds a `🇯🇵 MvJ` note to deck
-  **`Ankimorphs database::WaniKani Known`** with the word in the `Sentence`,
+  **`_Ankimorphs database::WaniKani Known`** with the word in the `Sentence`,
   `Word`, and `am-study-morphs` fields (Sentence is the note type's first field
   and can't be empty; `am-study-morphs` is the field AnkiMorphs reads), the
   English meaning in `Definition`, and tag `_card-status::i+0-manually`.
